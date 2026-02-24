@@ -1,6 +1,7 @@
 {
   "main": ".open-next/worker.js",
   "name": "docs",
+  "account_id": "YOUR_ACCOUNT_ID",
   "compatibility_date": "2025-03-25",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
