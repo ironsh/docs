@@ -1,0 +1,21 @@
+:root {
+    /* override default link colors */
+    --nextra-primary-hue: 50;
+    --nextra-primary: #e8c547;
+}
+
+html.dark {
+    --nextra-primary-hue: 50;
+    --nextra-primary: #e8c547;
+}
+
+.nextra-callout a {
+    color: inherit; /* beats x:text-primary-600 by later order */
+    text-decoration-color: currentColor;
+}
+
+/* Nice hover without fighting theme utilities */
+.nextra-callout a:hover {
+    opacity: 0.85;
+    text-decoration-color: currentColor;
+}

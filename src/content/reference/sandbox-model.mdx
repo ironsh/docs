@@ -1,0 +1,82 @@
+---
+title: "Sandbox Model"
+description: "How Iron.sh sandboxes are isolated and how network traffic is controlled."
+---
+
+# Sandbox Model
+
+Each sandbox is an ephemeral cloud VM provisioned exclusively for your workload. This page describes how sandboxes are isolated and how network traffic is handled.
+
+## Compute Isolation
+
+Every sandbox runs in its own dedicated virtual machine. Sandboxes cannot communicate with each other or with Iron.sh infrastructure. The file system is destroyed when the sandbox is torn down, so no data persists between runs unless you explicitly copy it out.
+
+## Network Isolation
+
+All outbound traffic from a sandbox is routed through a network bridge that Iron.sh controls. The bridge sits between the sandbox and the internet and is responsible for observing and enforcing egress rules.
+
+### Traffic Rules
+
+| Traffic Type          | Default Behavior                                       |
+| --------------------- | ------------------------------------------------------ |
+| Inbound SSH (TCP 22)  | Allowed via bridge from host to VM                     |
+| Outbound SSH (TCP 22) | Allowed only to manually whitelisted IP addresses [^1] |
+| ICMP (ping)           | Allowed                                                |
+| HTTPS / other TCP     | Allowed or blocked based on egress rules               |
+| All other traffic     | Blocked                                                |
+
+### Egress Observation
+
+The bridge inspects the hostname of every outbound connection attempt and records it in the egress audit log. This is how `irons audit egress` is able to show you every domain your workload has tried to reach, along with whether it was allowed or denied:
+
+```sh
+irons audit egress my-sandbox --follow
+```
+
+Because enforcement happens at the bridge level — outside the VM — a compromised workload cannot bypass egress controls by manipulating software inside the sandbox.
+
+### Egress Modes
+
+Egress rules can operate in two modes:
+
+| Mode   | Behavior                                                          |
+| ------ | ----------------------------------------------------------------- |
+| `warn` | All outbound connections are permitted, but violations are logged |
+| `deny` | Outbound connections to non-allowlisted domains are blocked       |
+
+Use `warn` mode when you're first profiling a workload to discover which domains it reaches. Switch to `deny` once you've built a precise allowlist.
+
+```sh
+irons egress mode warn    # observe without blocking
+irons egress mode deny    # enforce the allowlist
+```
+
+### Allowlisting Domains
+
+Egress rules are domain-based. You add domains to your allowlist using the CLI:
+
+```sh
+irons egress allow api.github.com
+irons egress allow pypi.org
+```
+
+Raw IP addresses are not supported as egress destinations. If a service only exposes an IP, create a DNS record for it and allowlist that hostname instead.
+
+### SSH Access
+
+Inbound SSH to a sandbox is routed through a bridge on the host machine. The bridge forwards connections on an assigned host port to port 22 inside the VM. Use `irons ssh --command` to get the exact host and port for a given sandbox:
+
+```sh
+irons ssh --command my-sandbox
+# e.g. ssh -p 32847 user@host.iron.sh
+```
+
+The SSH key you provide at creation time (`--key`, defaulting to `~/.ssh/id_rsa.pub`) is the only credential accepted.
+
+For outbound SSH from the sandbox (for example, to push to a Git remote over SSH), the destination IP address must be manually whitelisted. Contact [support@iron.sh](mailto:support@iron.sh) for assistance.
+
+[^1]: Outbound SSH destinations must be whitelisted by IP address, not by domain. Domain-based egress rules do not apply to SSH traffic.
+
+### ICMP
+
+ICMP (ping and related diagnostics) is always permitted and is not subject to egress rules.

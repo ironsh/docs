@@ -1,0 +1,72 @@
+---
+title: "Overview"
+description: "Learn what Iron.sh is, how it works, and how to get started."
+---
+
+# Overview
+
+Iron.sh provides egress-secured cloud VMs — called **sandboxes** — designed for use with AI agents. Using the `irons` CLI, you can spin up isolated, SSH-accessible environments with fine-grained control over outbound network traffic, giving an agent a real machine to work in without giving it unfettered internet access.
+
+The goal is simple: **let your agents do their job without exposing your infrastructure to the open internet.**
+
+## How It Works
+
+Each sandbox is a cloud VM provisioned through the Iron.sh API. Egress rules are enforced at the network level — you allowlist only the domains an agent needs to reach (such as a package registry or an internal API) and everything else is blocked. Rules can also be set to `warn` mode, which logs violations without blocking them, making it easy to audit traffic before locking things down.
+
+Getting started takes minutes:
+
+```sh
+# Create a sandbox and wait until it's ready
+irons create my-agent-sandbox
+
+# SSH in
+irons ssh my-agent-sandbox
+
+# When done, tear it down
+irons destroy my-agent-sandbox
+```
+
+## Typical Agent Workflow
+
+1. **Provision** a sandbox with the SSH key your agent will use:
+
+   ```sh
+   irons create agent-run-42 --key ~/.ssh/agent.pub
+   ```
+
+2. **Lock down egress** to only what the agent should reach:
+
+   ```sh
+   irons egress mode deny
+   irons egress allow api.openai.com
+   irons egress allow pypi.org
+   ```
+
+3. **Connect** your agent using the SSH command output:
+
+   ```sh
+   irons ssh --command agent-run-42
+   ```
+
+4. **Monitor** outbound traffic in real time:
+
+   ```sh
+   irons audit egress my-agent-sandbox --follow
+   ```
+
+5. **Tear down** when the run is complete:
+   ```sh
+   irons destroy --force agent-run-42
+   ```
+
+## Next Steps
+
+Check out the docs below to help you get started:
+
+import { Cards } from "nextra/components";
+
+<Cards>
+  <Cards.Card title="Quickstart" href="/getting-started/quickstart" arrow />
+  <Cards.Card title="CLI Reference" href="/reference/cli" arrow />
+  <Cards.Card title="Egress Rules" href="/reference/egress" arrow />
+</Cards>

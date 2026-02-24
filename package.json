@@ -1,0 +1,29 @@
+{
+  "name": "ironsh-docs",
+  "version": "0.0.1",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "next --port 4000",
+    "build": "next build",
+    "start": "next start",
+    "postbuild": "pagefind --site .next/server/app --output-path public/_pagefind",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "description": "",
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.14.4",
+    "next": "^16.0.7",
+    "nextra": "4.6.0",
+    "nextra-theme-docs": "4.6.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "pagefind": "^1.4.0",
+    "wrangler": "^4.53.0"
+  }
+}

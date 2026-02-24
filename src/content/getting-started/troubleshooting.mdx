@@ -1,0 +1,97 @@
+---
+title: "Troubleshooting"
+description: "Find solutions to common issues."
+---
+
+# Troubleshooting
+
+## TLS Errors
+
+If you see errors like "SSL syscall error" or "TLS handshake failed" inside a sandbox, this usually means the destination host is being blocked by your egress rules. To confirm, check the audit log for the sandbox:
+
+```sh
+irons audit egress my-sandbox
+```
+
+Look for `DENIED` entries matching the hostname your workload is trying to reach. To allow it, add the domain to your allowlist:
+
+```sh
+irons egress allow example.com
+```
+
+If you're not sure which domains you need yet, temporarily switch to `warn` mode. This logs violations without blocking traffic, so you can observe what your workload reaches before tightening the rules:
+
+```sh
+irons egress mode warn
+irons audit egress my-sandbox --follow
+```
+
+Once you've identified all the domains you need, add them with `irons egress allow` and switch back to `deny` mode.
+
+## Sandbox Stuck in a Non-Ready State
+
+If `irons create` or `irons start` hangs or the sandbox never reaches the `ready` state, check the current status:
+
+```sh
+irons status my-sandbox
+```
+
+The status indicator will show one of the following:
+
+| Indicator | Meaning         |
+| --------- | --------------- |
+| 🟢        | Running / ready |
+| 🟡        | Starting up     |
+| 🟠        | Stopped         |
+| 🔴        | Error           |
+
+If the sandbox is in an error state, try destroying it and creating a fresh one:
+
+```sh
+irons destroy --force my-sandbox
+irons create my-sandbox
+```
+
+## SSH Connection Refused
+
+If `irons ssh` fails to connect, the sandbox may still be starting up. Verify it's in the `ready` state before connecting:
+
+```sh
+irons status my-sandbox
+```
+
+If the sandbox shows 🟢 but SSH still fails, make sure the SSH key you're using matches the one you provided at creation time. By default, `irons` uses `~/.ssh/id_rsa.pub`. If you used a different key, pass it explicitly at creation:
+
+```sh
+irons create my-sandbox --key ~/.ssh/your_other_key.pub
+```
+
+## Authentication Errors
+
+If any command returns an authentication error, make sure your API key is set correctly:
+
+```sh
+echo $IRONS_API_KEY
+```
+
+If the variable is empty, export it in your current session:
+
+```sh
+export IRONS_API_KEY=your-api-key
+```
+
+For persistent access, add the export to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.).
+
+If you've verified the key is set and are still seeing errors, double-check that you're targeting the correct API endpoint. The default is `https://elrond.ironcd.com`. You can override it with:
+
+```sh
+export IRONS_API_URL=https://your-custom-endpoint.example.com
+```
+
+## Errors Connecting to Naked IP Addresses
+
+Iron.sh egress rules are domain-based and do not support allowlisting raw IP addresses. URLs like `https://10.20.30.40` will be blocked even in `warn` mode. If you need to reach a service that only exposes an IP address, create a DNS record for it so it can be referenced by hostname, then allowlist that hostname with `irons egress allow`.
+
+## Still Having Issues?
+
+If you're still running into problems, reach out to us at [support@iron.sh](mailto:support@iron.sh) and we'll help you get unblocked.

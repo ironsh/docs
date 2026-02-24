@@ -1,0 +1,120 @@
+---
+title: "Quickstart"
+description: "Get started with Iron.sh by installing the CLI and spinning up your first egress-secured sandbox."
+---
+
+import { Steps } from "nextra/components";
+
+# Quickstart
+
+This guide walks you through installing the `irons` CLI, authenticating, and spinning up your first egress-secured sandbox.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- An **Iron.sh API key** (request access at [iron.sh](https://iron.sh))
+- **macOS or Linux** (Windows is not currently supported)
+- An **SSH key pair** on your machine (defaults to `~/.ssh/id_rsa.pub`)
+
+## Getting Started
+
+<Steps>
+
+### Step 1: Install the CLI
+
+The quickest way to install `irons` is via the install script. It downloads the latest release, validates its SHA-256 checksum, and places the binary on your `$PATH`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ironsh/irons/main/install.sh | bash
+```
+
+Alternatively, you can install from source if you have Go 1.24+:
+
+```sh
+git clone https://github.com/ironsh/irons.git
+cd irons
+go install github.com/ironsh/irons@latest
+```
+
+### Step 2: Authenticate
+
+All `irons` commands require an API key. Set it as an environment variable:
+
+```sh
+export IRONS_API_KEY=your-api-key
+```
+
+> **Tip:** Add this line to your shell profile (e.g. `~/.zshrc` or `~/.bashrc`) so it's set automatically in every session.
+
+### Step 3: Create Your First Sandbox
+
+Provision a new sandbox and wait for it to be ready:
+
+```sh
+irons create my-first-sandbox
+```
+
+`irons` will poll until the sandbox reaches the `ready` state and then print connection details. You can pass `--async` to return immediately without waiting.
+
+### Step 4: SSH Into the Sandbox
+
+Once the sandbox is ready, open an interactive SSH session:
+
+```sh
+irons ssh my-first-sandbox
+```
+
+You now have a fully isolated cloud VM to work in. Need to hand the connection details to a script or AI agent instead? Use `--command` to print the SSH command rather than executing it:
+
+```sh
+irons ssh --command my-first-sandbox
+```
+
+### Step 5: Configure Egress Rules
+
+By default, outbound traffic is observed but not blocked. Before running untrusted workloads, lock down egress to only the domains your agent needs:
+
+```sh
+# Switch to blocking mode
+irons egress mode deny
+
+# Allow specific domains
+irons egress allow api.openai.com
+irons egress allow pypi.org
+irons egress allow api.github.com
+```
+
+Not sure which domains you need yet? Run in `warn` mode first and tail the audit log to see what your workload reaches:
+
+```sh
+irons egress mode warn
+irons audit egress my-first-sandbox --follow
+```
+
+When you're satisfied with your allowlist, switch to `deny` mode to enforce it.
+
+### Step 6: Tear Down the Sandbox
+
+When you're done, destroy the sandbox and clean up all associated resources:
+
+```sh
+irons destroy my-first-sandbox
+```
+
+If the sandbox is still running, pass `--force` to stop it automatically before destroying:
+
+```sh
+irons destroy --force my-first-sandbox
+```
+
+</Steps>
+
+## Next Steps
+
+import { Cards } from "nextra/components";
+
+<Cards>
+  <Cards.Card title="CLI Reference" href="/reference/cli" arrow />
+  <Cards.Card title="Egress Rules" href="/reference/egress" arrow />
+</Cards>
