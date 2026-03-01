@@ -5,270 +5,373 @@ description: "Complete reference for all irons CLI commands and flags."
 
 # CLI Reference
 
-The `irons` CLI is the primary interface for managing Iron.sh sandboxes. All commands require the `IRONS_API_KEY` environment variable to be set.
-
-```sh
-export IRONS_API_KEY=your-api-key
-```
-
----
-
-## `irons create`
-
-Provisions a new sandbox and waits until it reaches the `ready` state.
-
-```sh
-irons create <name> [flags]
-```
-
-**Arguments**
-
-| Argument | Description                          |
-| -------- | ------------------------------------ |
-| `name`   | A unique name for the sandbox        |
-
-**Flags**
-
-| Flag        | Default                  | Description                                                              |
-| ----------- | ------------------------ | ------------------------------------------------------------------------ |
-| `--key`     | `~/.ssh/id_rsa.pub`      | Path to the SSH public key to authorize on the sandbox                   |
-| `--async`   | `false`                  | Return immediately without waiting for the sandbox to reach `ready`      |
-
-**Examples**
-
-```sh
-# Create a sandbox with the default SSH key
-irons create my-sandbox
-
-# Create with a specific SSH key and don't wait
-irons create agent-run-42 --key ~/.ssh/agent.pub --async
-```
-
----
-
-## `irons list`
-
-Lists all sandboxes in your account with their current status.
-
-```sh
-irons list
-```
-
-**Example output**
-
-```
-NAME              STATUS    CREATED
-my-sandbox        ready     5 minutes ago
-agent-run-42      ready     2 hours ago
-old-sandbox       stopped   3 days ago
-```
-
----
-
-## `irons status`
-
-Prints the current status and connection details for a sandbox.
-
-```sh
-irons status <name>
-```
-
-**Arguments**
-
-| Argument | Description           |
-| -------- | --------------------- |
-| `name`   | Name of the sandbox   |
-
----
-
-## `irons ssh`
-
-Opens an interactive SSH session into a sandbox.
-
-```sh
-irons ssh <name> [flags]
-```
-
-**Arguments**
-
-| Argument | Description           |
-| -------- | --------------------- |
-| `name`   | Name of the sandbox   |
-
-**Flags**
-
-| Flag        | Description                                                                 |
-| ----------- | --------------------------------------------------------------------------- |
-| `--command` | Print the SSH command instead of executing it (useful for scripts or agents) |
-
-**Examples**
-
-```sh
-# Open an interactive session
-irons ssh my-sandbox
-
-# Print the SSH command for use in a script or agent
-irons ssh --command my-sandbox
-# e.g. ssh -p 32847 user@host.iron.sh
-```
-
----
-
-## `irons destroy`
-
-Destroys a sandbox and cleans up all associated resources. This is irreversible.
-
-```sh
-irons destroy <name> [flags]
-```
-
-**Arguments**
-
-| Argument | Description           |
-| -------- | --------------------- |
-| `name`   | Name of the sandbox   |
-
-**Flags**
-
-| Flag      | Description                                              |
-| --------- | -------------------------------------------------------- |
-| `--force` | Stop the sandbox before destroying if it is still running |
-
-**Examples**
-
-```sh
-irons destroy my-sandbox
-irons destroy --force my-sandbox
-```
-
----
-
-## `irons egress`
-
-Manages outbound network traffic rules for your sandboxes.
-
-### `irons egress mode`
-
-Sets the global egress enforcement mode.
-
-```sh
-irons egress mode <mode>
-```
-
-| Mode   | Behavior                                                          |
-| ------ | ----------------------------------------------------------------- |
-| `warn` | All outbound connections are permitted, but violations are logged |
-| `deny` | Outbound connections to non-allowlisted domains are blocked       |
-
-```sh
-irons egress mode warn
-irons egress mode deny
-```
-
-### `irons egress allow`
-
-Adds a domain to the egress allowlist.
-
-```sh
-irons egress allow <domain>
-```
-
-```sh
-irons egress allow api.openai.com
-irons egress allow pypi.org
-irons egress allow api.github.com
-```
-
-### `irons egress deny`
-
-Removes a domain from the egress allowlist.
-
-```sh
-irons egress deny <domain>
-```
-
-```sh
-irons egress deny pypi.org
-```
-
-### `irons egress list`
-
-Lists all domains currently on the egress allowlist and the active mode.
-
-```sh
-irons egress list
-```
-
-**Example output**
-
-```
-MODE: deny
-
-ALLOWED DOMAINS
-api.openai.com
-api.github.com
-pypi.org
-```
-
----
-
-## `irons audit`
-
-### `irons audit egress`
-
-Displays the egress audit log for a sandbox — every outbound connection attempt, whether allowed or denied.
-
-```sh
-irons audit egress <name> [flags]
-```
-
-**Arguments**
-
-| Argument | Description           |
-| -------- | --------------------- |
-| `name`   | Name of the sandbox   |
-
-**Flags**
-
-| Flag       | Description                                     |
-| ---------- | ----------------------------------------------- |
-| `--follow` | Stream new log entries in real time (like `tail -f`) |
-
-**Examples**
-
-```sh
-# Print the full audit log
-irons audit egress my-sandbox
-
-# Stream new entries as they arrive
-irons audit egress my-sandbox --follow
-```
-
-**Example output**
-
-```
-TIMESTAMP              DOMAIN                  STATUS
-2025-01-15T10:42:01Z   api.openai.com          allowed
-2025-01-15T10:42:03Z   pypi.org                allowed
-2025-01-15T10:42:07Z   example.com             denied
-```
-
 ---
 
 ## Global Flags
 
 These flags are available on every command.
 
-| Flag        | Description                                        |
-| ----------- | -------------------------------------------------- |
-| `--help`    | Print help for a command                           |
-| `--version` | Print the current `irons` version                  |
-| `--api-key` | API key to use instead of `$IRONS_API_KEY`         |
+| Flag          | Env var           | Default                  | Description                               |
+| ------------- | ----------------- | ------------------------ | ----------------------------------------- |
+| `--api-key`   | `IRONS_API_KEY`   |                          | API key for authentication                |
+| `--api-url`   | `IRONS_API_URL`   | `https://api.iron.sh/v1` | API endpoint URL                          |
+| `--debug-api` | `IRONS_DEBUG_API` |                          | Dump raw API requests/responses to stderr |
+
+The API key can also be stored in `~/.config/irons/config.yml`:
+
+```yaml
+api_key: your-api-key
+```
 
 ---
 
-## Environment Variables
+## Addressing Sandboxes
 
-| Variable         | Description                           |
-| ---------------- | ------------------------------------- |
-| `IRONS_API_KEY`  | Your Iron.sh API key (**required**)   |
+Every command that targets a specific sandbox accepts either the sandbox **name** or its **VM ID** (which starts with `vm_`). If the value doesn't start with `vm_`, it is treated as a name and the first non-destroyed sandbox with that name is used.
+
+```sh
+# These are equivalent:
+irons status my-sandbox
+irons status vm_abc123
+```
+
+---
+
+## `login`
+
+Authenticate and save an API key to the local config file.
+
+```
+irons login
+```
+
+Opens a browser-based device authorization flow. On completion the API key is written to `~/.config/irons/config.yml` and used automatically by all subsequent commands.
+
+---
+
+## `create`
+
+Provision a new sandbox.
+
+```
+irons create <name> [flags]
+```
+
+| Flag          | Default                     | Description                                                    |
+| ------------- | --------------------------- | -------------------------------------------------------------- |
+| `--key`, `-k` | first key found in `~/.ssh` | Path to an SSH public key to install on the sandbox            |
+| `--async`     |                             | Return immediately without waiting for the sandbox to be ready |
+
+If `--key` is not provided, the following key files are checked in order and the first one found is used:
+
+1. `~/.ssh/id_ed25519.pub`
+2. `~/.ssh/id_ed25519_sk.pub`
+3. `~/.ssh/id_ecdsa.pub`
+4. `~/.ssh/id_ecdsa_sk.pub`
+5. `~/.ssh/id_rsa.pub`
+
+By default the command blocks until the sandbox reaches the `ready` state.
+
+**Examples**
+
+```sh
+irons create my-sandbox
+irons create my-sandbox --key ~/.ssh/agent.pub
+irons create my-sandbox --async
+```
+
+---
+
+## `list`
+
+List all sandboxes on the account.
+
+```
+irons list
+```
+
+Displays a table of every sandbox with its name, ID, status, and creation date.
+
+---
+
+## `status`
+
+Show the current status and metadata of a sandbox.
+
+```
+irons status <name|id>
+```
+
+| Indicator | Meaning         |
+| --------- | --------------- |
+| 🟢        | Running / ready |
+| 🟡        | Starting up     |
+| 🟠        | Stopped         |
+| 🔴        | Error           |
+
+---
+
+## `start`
+
+Start a sandbox that was previously stopped.
+
+```
+irons start <name|id> [flags]
+```
+
+| Flag      | Description                                                         |
+| --------- | ------------------------------------------------------------------- |
+| `--async` | Return immediately without waiting for the sandbox to reach `ready` |
+
+By default the command blocks until the sandbox reaches the `ready` state.
+
+---
+
+## `stop`
+
+Stop a running sandbox. The sandbox can be restarted later with `start`.
+
+```
+irons stop <name|id> [flags]
+```
+
+| Flag      | Description                                                           |
+| --------- | --------------------------------------------------------------------- |
+| `--async` | Return immediately without waiting for the sandbox to reach `stopped` |
+
+By default the command blocks until the sandbox reaches the `stopped` state.
+
+---
+
+## `destroy`
+
+Permanently destroy a sandbox and clean up all associated resources.
+
+```
+irons destroy <name|id> [flags]
+```
+
+| Flag      | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `--force` | Automatically stop the sandbox first if it is currently running |
+
+**Examples**
+
+```sh
+irons destroy my-sandbox
+irons destroy my-sandbox --force
+```
+
+---
+
+## `ssh`
+
+Open an interactive SSH session in a sandbox.
+
+```
+irons ssh <name|id> [flags]
+```
+
+| Flag                | Description                                           |
+| ------------------- | ----------------------------------------------------- |
+| `--command`, `-c`   | Print the SSH command instead of executing it         |
+| `--strict-hostkeys` | Enable strict host key checking (disabled by default) |
+
+**Examples**
+
+```sh
+irons ssh my-sandbox
+irons ssh my-sandbox --command
+```
+
+---
+
+## `scp`
+
+Copy files to or from a sandbox using SCP. Prefix a path with the sandbox name (or VM ID) and a colon to denote a remote path.
+
+```
+irons scp <src> <dst> [flags]
+```
+
+Exactly one of `src` or `dst` must be a remote path in `name:path` or `vm_id:path` form.
+
+| Flag                | Description                                           |
+| ------------------- | ----------------------------------------------------- |
+| `--recursive`, `-r` | Recursively copy entire directories                   |
+| `--command`, `-c`   | Print the SCP command instead of executing it         |
+| `--strict-hostkeys` | Enable strict host key checking (disabled by default) |
+
+**Examples**
+
+```sh
+# Upload a local file to the sandbox
+irons scp ./local-file.txt my-sandbox:/remote/path/
+
+# Download a file from the sandbox
+irons scp my-sandbox:/remote/file.txt ./local-dest/
+
+# Recursively copy a directory
+irons scp -r ./my-dir my-sandbox:/remote/path/
+```
+
+---
+
+## `forward`
+
+Forward a port from a sandbox to your local machine via SSH tunneling.
+
+```
+irons forward <name|id> [flags]
+```
+
+| Flag                  | Default                 | Description                                           |
+| --------------------- | ----------------------- | ----------------------------------------------------- |
+| `--remote-port`, `-r` | (required)              | Remote port on the sandbox to forward                 |
+| `--local-port`, `-l`  | same as `--remote-port` | Local port to listen on                               |
+| `--command`, `-c`     |                         | Print the SSH command instead of executing it         |
+| `--strict-hostkeys`   |                         | Enable strict host key checking (disabled by default) |
+
+**Examples**
+
+```sh
+irons forward my-sandbox --remote-port 3000
+irons forward my-sandbox --remote-port 5432 --local-port 5433
+irons forward my-sandbox --remote-port 3000 --command
+```
+
+---
+
+## `egress`
+
+Manage outbound network rules for the account.
+
+### `egress list`
+
+List all current egress rules.
+
+```
+irons egress list
+```
+
+### `egress add`
+
+Add an egress rule to allow outbound traffic to a host or CIDR range.
+
+```
+irons egress add [flags]
+```
+
+| Flag        | Description                                            |
+| ----------- | ------------------------------------------------------ |
+| `--host`    | Hostname to allow (mutually exclusive with `--cidr`)   |
+| `--cidr`    | CIDR range to allow (mutually exclusive with `--host`) |
+| `--name`    | Optional human-readable name for the rule              |
+| `--comment` | Optional comment                                       |
+
+Exactly one of `--host` or `--cidr` is required.
+
+**Examples**
+
+```sh
+irons egress add --host crates.io
+irons egress add --cidr 10.0.0.0/8 --name "internal network"
+```
+
+### `egress remove`
+
+Remove an egress rule by its ID.
+
+```
+irons egress remove <rule_id>
+```
+
+### `egress mode`
+
+Get or set the egress enforcement mode for the account.
+
+```
+irons egress mode [enforce|warn]
+```
+
+| Mode      | Behaviour                                              |
+| --------- | ------------------------------------------------------ |
+| `enforce` | Outbound traffic not matching an allow rule is blocked |
+| `warn`    | Violations are logged but traffic is not blocked       |
+
+Called with no argument, prints the current mode. Pass `enforce` or `warn` to change it.
+
+**Examples**
+
+```sh
+irons egress mode
+irons egress mode enforce
+irons egress mode warn
+```
+
+---
+
+## `audit`
+
+Inspect the history of outbound network connection attempts.
+
+### `audit egress`
+
+Print the egress audit log — every outbound connection attempt, whether it was allowed or denied, and the mode that was active at the time.
+
+```
+irons audit egress [flags]
+```
+
+| Flag           | Default    | Description                                        |
+| -------------- | ---------- | -------------------------------------------------- |
+| `--follow, -f` |            | Continuously poll for new events (like `tail -f`)  |
+| `--vm`         |            | Filter by sandbox name or VM ID                    |
+| `--verdict`    |            | Filter by verdict: `allowed`, `blocked`, or `warn` |
+| `--since`      | 1 hour ago | Show events after this timestamp (RFC 3339)        |
+| `--until`      |            | Show events before this timestamp (RFC 3339)       |
+| `--limit`      |            | Maximum number of events to return                 |
+
+Each line of output contains the following space-separated fields:
+
+```
+TIMESTAMP  VERDICT  VM_ID  PROTOCOL  HOST  (mode: MODE)
+```
+
+| Field       | Description                                                                |
+| ----------- | -------------------------------------------------------------------------- |
+| `TIMESTAMP` | RFC 3339 timestamp (local time) of the connection attempt                  |
+| `VERDICT`   | `ALLOW` if permitted, `DENY` if blocked, `WARN` if in warn mode            |
+| `VM_ID`     | The VM that made the connection attempt                                    |
+| `PROTOCOL`  | Network protocol (e.g. `tcp`)                                              |
+| `HOST`      | The destination hostname                                                   |
+| `MODE`      | The egress mode active at the time: `warn` (log only) or `enforce` (block) |
+
+**Example output**
+
+```
+2026-02-19T16:41:54-07:00  ALLOW  vm_abc123  tcp    changelogs.ubuntu.com  (mode: warn)
+2026-02-19T16:42:00-07:00  ALLOW  vm_abc123  tcp    example.com            (mode: warn)
+2026-02-19T16:42:26-07:00  DENY   vm_abc123  tcp    example2.com           (mode: enforce)
+```
+
+**Examples**
+
+```sh
+# Show the last hour of egress events across all sandboxes
+irons audit egress
+
+# Filter to a specific sandbox
+irons audit egress --vm my-sandbox
+
+# Only show blocked connections
+irons audit egress --vm my-sandbox --verdict blocked
+
+# Tail new events as they arrive
+irons audit egress --vm my-sandbox --follow
+
+# Events in a specific time window
+irons audit egress --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z
+```
+
+> **Tip:** Run `irons audit egress --vm my-sandbox --follow` while your egress mode is set to `warn` to observe which domains your agent is reaching before switching to `enforce`. This makes it easy to build a precise allowlist without trial and error.
