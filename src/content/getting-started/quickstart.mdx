@@ -13,7 +13,7 @@ This guide walks you through installing the `irons` CLI, authenticating, and spi
 
 Before you begin, make sure you have:
 
-- An **Iron.sh API key** (request access at [iron.sh](https://iron.sh))
+- An **Iron.sh account** (sign up at [iron.sh](https://iron.sh))
 - **macOS or Linux** (Windows is not currently supported)
 - An **SSH key pair** on your machine (defaults to `~/.ssh/id_rsa.pub`)
 
@@ -39,13 +39,13 @@ go install github.com/ironsh/irons@latest
 
 ### Step 2: Authenticate
 
-All `irons` commands require an API key. Set it as an environment variable:
+Log in to your Iron.sh account:
 
 ```sh
-export IRONS_API_KEY=your-api-key
+irons login
 ```
 
-> **Tip:** Add this line to your shell profile (e.g. `~/.zshrc` or `~/.bashrc`) so it's set automatically in every session.
+This opens a browser-based device authorization flow. Once complete, your API key is saved to `~/.config/irons/config.yml` and used automatically by all subsequent commands.
 
 ### Step 3: Create Your First Sandbox
 
@@ -76,37 +76,33 @@ irons ssh --command my-first-sandbox
 By default, outbound traffic is observed but not blocked. Before running untrusted workloads, lock down egress to only the domains your agent needs:
 
 ```sh
-# Switch to blocking mode
-irons egress mode deny
-
 # Allow specific domains
-irons egress allow api.openai.com
-irons egress allow pypi.org
-irons egress allow api.github.com
+irons egress add --host api.openai.com
+irons egress add --host pypi.org
+irons egress add --host api.github.com
+
+# Switch to blocking mode
+irons egress mode enforce
 ```
 
 Not sure which domains you need yet? Run in `warn` mode first and tail the audit log to see what your workload reaches:
 
 ```sh
 irons egress mode warn
-irons audit egress my-first-sandbox --follow
+irons audit egress --vm my-first-sandbox --follow
 ```
 
-When you're satisfied with your allowlist, switch to `deny` mode to enforce it.
+When you're satisfied with your allowlist, switch to `enforce` mode to block everything else.
 
 ### Step 6: Tear Down the Sandbox
 
 When you're done, destroy the sandbox and clean up all associated resources:
 
 ```sh
-irons destroy my-first-sandbox
+irons destroy my-first-sandbox --force
 ```
 
-If the sandbox is still running, pass `--force` to stop it automatically before destroying:
-
-```sh
-irons destroy --force my-first-sandbox
-```
+Passing `--force` will automatically stop the sandbox if it's still running before destroying.
 
 </Steps>
 
