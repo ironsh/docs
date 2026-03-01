@@ -25,8 +25,8 @@ All responses use JSON. All timestamps are ISO 8601 UTC.
 
 All resources use prefixed, opaque IDs:
 
-| Resource     | Prefix | Example          |
-| ------------ | ------ | ---------------- |
+| Resource     | Prefix | Example         |
+| ------------ | ------ | --------------- |
 | VM           | `vm_`  | `vm_k3mf9xvw2p` |
 | Egress Rule  | `egr_` | `egr_9xm2kfp4`  |
 | Egress Event | `ee_`  | `ee_w8n3vqx1`   |
@@ -58,15 +58,15 @@ Error responses include a machine-readable `code` and a human-readable `message`
 }
 ```
 
-| HTTP Status | Meaning                              |
-| ----------- | ------------------------------------ |
-| `400`       | Bad request / validation error       |
-| `401`       | Missing or invalid API key           |
-| `404`       | Resource not found                   |
-| `409`       | Conflict (e.g. VM already running)   |
-| `422`       | Unprocessable entity                 |
-| `429`       | Rate limited                         |
-| `500`       | Internal server error                |
+| HTTP Status | Meaning                            |
+| ----------- | ---------------------------------- |
+| `400`       | Bad request / validation error     |
+| `401`       | Missing or invalid API key         |
+| `404`       | Resource not found                 |
+| `409`       | Conflict (e.g. VM already running) |
+| `422`       | Unprocessable entity               |
+| `429`       | Rate limited                       |
+| `500`       | Internal server error              |
 
 ---
 
@@ -76,13 +76,13 @@ Error responses include a machine-readable `code` and a human-readable `message`
 
 The API exposes simplified statuses derived from internal VM states. The `status` field is stable and safe to branch on. The `status_detail` field exposes the internal state for debugging and observability.
 
-| `status`    | `status_detail` values               | Description                          |
-| ----------- | ------------------------------------ | ------------------------------------ |
-| `pending`   | `queued`, `creating`, `starting`     | VM is being provisioned              |
-| `running`   | `running`, `ready`                   | VM is up and accepting connections   |
-| `stopped`   | `stopping`, `stopped`               | VM is shut down                      |
-| `destroyed` | `destroying`, `destroyed`           | VM has been terminated               |
-| `failed`    | `failed`                             | VM encountered an error              |
+| `status`    | `status_detail` values           | Description                        |
+| ----------- | -------------------------------- | ---------------------------------- |
+| `pending`   | `queued`, `creating`, `starting` | VM is being provisioned            |
+| `running`   | `running`, `ready`               | VM is up and accepting connections |
+| `stopped`   | `stopping`, `stopped`            | VM is shut down                    |
+| `destroyed` | `destroying`, `destroyed`        | VM has been terminated             |
+| `failed`    | `failed`                         | VM encountered an error            |
 
 ### Create a VM
 
@@ -92,10 +92,10 @@ POST /v1/vms
 
 **Request body:**
 
-| Field        | Type   | Required | Description                                                                                                                                   |
-| ------------ | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field        | Type   | Required | Description                                                                                                                                     |
+| ------------ | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`       | string | yes      | Human-readable name. Must be unique among non-destroyed VMs within the account. Can be reused once the previous VM with that name is destroyed. |
-| `public_key` | string | yes      | SSH public key for access.                                                                                                                    |
+| `public_key` | string | yes      | SSH public key for access.                                                                                                                      |
 
 ```sh
 curl -X POST https://api.iron.sh/v1/vms \
@@ -130,15 +130,15 @@ GET /v1/vms
 
 **Query parameters:**
 
-| Param           | Type    | Default      | Description                                                                                                  |
-| --------------- | ------- | ------------ | ------------------------------------------------------------------------------------------------------------ |
-| `status`        | string  | —            | Filter by simplified status: `pending`, `running`, `stopped`, `destroyed`, `failed`                          |
+| Param           | Type    | Default      | Description                                                                                                                                 |
+| --------------- | ------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`        | string  | —            | Filter by simplified status: `pending`, `running`, `stopped`, `destroyed`, `failed`                                                         |
 | `status_detail` | string  | —            | Filter by internal status: `queued`, `creating`, `starting`, `running`, `ready`, `stopping`, `stopped`, `destroying`, `destroyed`, `failed` |
-| `name`          | string  | —            | Filter by exact name match                                                                                   |
-| `cursor`        | string  | —            | Pagination cursor from previous response                                                                     |
-| `limit`         | integer | `20`         | Results per page. Max 100.                                                                                   |
-| `sort`          | string  | `created_at` | Sort field: `created_at`, `updated_at`, `name`                                                               |
-| `order`         | string  | `desc`       | Sort order: `asc`, `desc`                                                                                    |
+| `name`          | string  | —            | Filter by exact name match                                                                                                                  |
+| `cursor`        | string  | —            | Pagination cursor from previous response                                                                                                    |
+| `limit`         | integer | `20`         | Results per page. Max 100.                                                                                                                  |
+| `sort`          | string  | `created_at` | Sort field: `created_at`, `updated_at`, `name`                                                                                              |
+| `order`         | string  | `desc`       | Sort order: `asc`, `desc`                                                                                                                   |
 
 ```sh
 curl https://api.iron.sh/v1/vms?status=running&limit=10 \
@@ -299,10 +299,10 @@ curl https://api.iron.sh/v1/egress/policy \
 }
 ```
 
-| Mode      | Behavior                                                                  |
-| --------- | ------------------------------------------------------------------------- |
-| `enforce` | Block all egress traffic except to hosts/CIDRs in the allowlist.          |
-| `warn`    | Allow all traffic but log requests to non-allowlisted destinations.       |
+| Mode      | Behavior                                                            |
+| --------- | ------------------------------------------------------------------- |
+| `enforce` | Block all egress traffic except to hosts/CIDRs in the allowlist.    |
+| `warn`    | Allow all traffic but log requests to non-allowlisted destinations. |
 
 ---
 
@@ -314,9 +314,9 @@ PUT /v1/egress/policy
 
 **Request body:**
 
-| Field  | Type   | Required | Description          |
-| ------ | ------ | -------- | -------------------- |
-| `mode` | string | yes      | `enforce` or `warn`  |
+| Field  | Type   | Required | Description         |
+| ------ | ------ | -------- | ------------------- |
+| `mode` | string | yes      | `enforce` or `warn` |
 
 ```sh
 curl -X PUT https://api.iron.sh/v1/egress/policy \
@@ -344,15 +344,15 @@ curl https://api.iron.sh/v1/egress/rules \
 
 **Query parameters:**
 
-| Param    | Type    | Default      | Description                          |
-| -------- | ------- | ------------ | ------------------------------------ |
-| `host`   | string  | —            | Filter by exact host match           |
-| `cidr`   | string  | —            | Filter by exact CIDR match           |
-| `name`   | string  | —            | Filter by exact name match           |
-| `cursor` | string  | —            | Pagination cursor                    |
-| `limit`  | integer | `50`         | Results per page. Max 200.           |
-| `sort`   | string  | `created_at` | Sort field: `created_at`, `host`     |
-| `order`  | string  | `desc`       | Sort order: `asc`, `desc`            |
+| Param    | Type    | Default      | Description                      |
+| -------- | ------- | ------------ | -------------------------------- |
+| `host`   | string  | —            | Filter by exact host match       |
+| `cidr`   | string  | —            | Filter by exact CIDR match       |
+| `name`   | string  | —            | Filter by exact name match       |
+| `cursor` | string  | —            | Pagination cursor                |
+| `limit`  | integer | `50`         | Results per page. Max 200.       |
+| `sort`   | string  | `created_at` | Sort field: `created_at`, `host` |
+| `order`  | string  | `desc`       | Sort order: `asc`, `desc`        |
 
 **Response:** `200 OK`
 
@@ -393,9 +393,9 @@ POST /v1/egress/rules
 
 | Field     | Type   | Required | Description                                                                                    |
 | --------- | ------ | -------- | ---------------------------------------------------------------------------------------------- |
-| `name`    | string | no       | Unique human-readable identifier for the rule. Must be unique across all rules in the account.  |
+| `name`    | string | no       | Unique human-readable identifier for the rule. Must be unique across all rules in the account. |
 | `host`    | string | no       | Domain to match (e.g. `api.github.com`, `*.npmjs.org`). Provide `host` or `cidr`, not both.    |
-| `cidr`    | string | no       | CIDR range to match (e.g. `10.0.0.0/8`). Provide `host` or `cidr`, not both.                  |
+| `cidr`    | string | no       | CIDR range to match (e.g. `10.0.0.0/8`). Provide `host` or `cidr`, not both.                   |
 | `comment` | string | no       | Optional human-readable note about the rule's purpose.                                         |
 
 ```sh
@@ -445,20 +445,20 @@ curl "https://api.iron.sh/v1/audit/egress?vm_id=vm_k3mf9xvw2p&verdict=denied&lim
 
 **Query parameters:**
 
-| Param      | Type            | Default | Description                                              |
-| ---------- | --------------- | ------- | -------------------------------------------------------- |
-| `vm_id`    | string          | —       | Filter by VM ID (e.g. `vm_k3mf9xvw2p`)                  |
-| `verdict`  | string          | —       | Filter by verdict: `allowed`, `denied`                   |
-| `allowed`  | boolean         | —       | Filter by whether the request was actually permitted     |
-| `mode`     | string          | —       | Filter by egress mode at time of event: `enforce`, `warn`|
-| `host`     | string          | —       | Filter by exact host match                               |
-| `cidr`     | string          | —       | Filter by CIDR match                                     |
-| `protocol` | string          | —       | Filter by protocol: `http`, `tls`, `tcp`                 |
-| `since`    | string (ISO 8601) | —     | Only events after this timestamp                         |
-| `until`    | string (ISO 8601) | —     | Only events before this timestamp                        |
-| `cursor`   | string          | —       | Pagination cursor                                        |
-| `limit`    | integer         | `50`    | Results per page. Max 500.                               |
-| `order`    | string          | `desc`  | Sort order: `asc`, `desc` (always sorted by timestamp)   |
+| Param      | Type              | Default | Description                                               |
+| ---------- | ----------------- | ------- | --------------------------------------------------------- |
+| `vm_id`    | string            | —       | Filter by VM ID (e.g. `vm_k3mf9xvw2p`)                    |
+| `verdict`  | string            | —       | Filter by verdict: `allowed`, `denied`                    |
+| `allowed`  | boolean           | —       | Filter by whether the request was actually permitted      |
+| `mode`     | string            | —       | Filter by egress mode at time of event: `enforce`, `warn` |
+| `host`     | string            | —       | Filter by exact host match                                |
+| `cidr`     | string            | —       | Filter by CIDR match                                      |
+| `protocol` | string            | —       | Filter by protocol: `http`, `tls`, `tcp`                  |
+| `since`    | string (ISO 8601) | —       | Only events after this timestamp                          |
+| `until`    | string (ISO 8601) | —       | Only events before this timestamp                         |
+| `cursor`   | string            | —       | Pagination cursor                                         |
+| `limit`    | integer           | `50`    | Results per page. Max 500.                                |
+| `order`    | string            | `desc`  | Sort order: `asc`, `desc` (always sorted by timestamp)    |
 
 **Response:** `200 OK`
 
@@ -500,9 +500,11 @@ curl -X POST https://api.iron.sh/v1/auth/device/code
 
 ```json
 {
-  "code": "ABCD-1234",
-  "verification_uri": "https://app.iron.sh/activate",
-  "expires_at": "2026-02-28T12:15:00Z"
+  "data": {
+    "code": "ABCD-1234",
+    "verification_uri": "https://app.iron.sh/activate",
+    "expires_at": "2026-02-28T12:15:00Z"
+  }
 }
 ```
 
@@ -516,9 +518,9 @@ GET /v1/auth/device/poll
 
 **Query parameters:**
 
-| Param  | Type   | Required | Description                              |
-| ------ | ------ | -------- | ---------------------------------------- |
-| `code` | string | yes      | The device code from the code request    |
+| Param  | Type   | Required | Description                           |
+| ------ | ------ | -------- | ------------------------------------- |
+| `code` | string | yes      | The device code from the code request |
 
 ```sh
 curl "https://api.iron.sh/v1/auth/device/poll?code=ABCD-1234"
@@ -528,13 +530,15 @@ curl "https://api.iron.sh/v1/auth/device/poll?code=ABCD-1234"
 
 ```json
 {
-  "status": "authorized",
-  "token": "iron_live_a1b2c3d4e5f6..."
+  "data": {
+    "status": "authorized",
+    "token": "iron_live_a1b2c3d4e5f6..."
+  }
 }
 ```
 
-| Status       | Meaning                                          |
-| ------------ | ------------------------------------------------ |
-| `pending`    | User hasn't authorized yet. Continue polling.    |
-| `authorized` | Authorization successful. `token` is present.   |
-| `expired`    | Code expired. Request a new one.                 |
+| Status       | Meaning                                       |
+| ------------ | --------------------------------------------- |
+| `pending`    | User hasn't authorized yet. Continue polling. |
+| `authorized` | Authorization successful. `token` is present. |
+| `expired`    | Code expired. Request a new one.              |
