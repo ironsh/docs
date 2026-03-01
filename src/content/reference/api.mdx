@@ -97,6 +97,16 @@ POST /v1/vms
 | `name`       | string | yes      | Human-readable name. Must be unique among non-destroyed VMs within the account. Can be reused once the previous VM with that name is destroyed. |
 | `public_key` | string | yes      | SSH public key for access.                                                                                                                    |
 
+```sh
+curl -X POST https://api.iron.sh/v1/vms \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-dev-env",
+    "public_key": "ssh-ed25519 AAAA..."
+  }'
+```
+
 **Response:** `201 Created`
 
 ```json
@@ -130,6 +140,11 @@ GET /v1/vms
 | `sort`          | string  | `created_at` | Sort field: `created_at`, `updated_at`, `name`                                                               |
 | `order`         | string  | `desc`       | Sort order: `asc`, `desc`                                                                                    |
 
+```sh
+curl https://api.iron.sh/v1/vms?status=running&limit=10 \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
 **Response:** `200 OK`
 
 ```json
@@ -157,6 +172,11 @@ GET /v1/vms
 GET /v1/vms/{vm_id}
 ```
 
+```sh
+curl https://api.iron.sh/v1/vms/vm_k3mf9xvw2p \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
 **Response:** `200 OK`
 
 ```json
@@ -176,6 +196,11 @@ GET /v1/vms/{vm_id}
 
 ```
 DELETE /v1/vms/{vm_id}
+```
+
+```sh
+curl -X DELETE https://api.iron.sh/v1/vms/vm_k3mf9xvw2p \
+  -H "Authorization: Bearer $IRONS_API_KEY"
 ```
 
 The VM must be stopped before it can be destroyed. Returns `409 Conflict` if the VM is still running:
@@ -199,6 +224,11 @@ The VM must be stopped before it can be destroyed. Returns `409 Conflict` if the
 POST /v1/vms/{vm_id}/start
 ```
 
+```sh
+curl -X POST https://api.iron.sh/v1/vms/vm_k3mf9xvw2p/start \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
 **Response:** `200 OK`
 
 Returns the full VM object with `status: "running"`.
@@ -211,6 +241,11 @@ Returns the full VM object with `status: "running"`.
 POST /v1/vms/{vm_id}/stop
 ```
 
+```sh
+curl -X POST https://api.iron.sh/v1/vms/vm_k3mf9xvw2p/stop \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
 **Response:** `200 OK`
 
 Returns the full VM object with `status: "stopped"`.
@@ -221,6 +256,11 @@ Returns the full VM object with `status: "stopped"`.
 
 ```
 GET /v1/vms/{vm_id}/ssh
+```
+
+```sh
+curl https://api.iron.sh/v1/vms/vm_k3mf9xvw2p/ssh \
+  -H "Authorization: Bearer $IRONS_API_KEY"
 ```
 
 **Response:** `200 OK`
@@ -244,6 +284,11 @@ Account-level egress settings apply to all VMs unless overridden at the VM level
 
 ```
 GET /v1/egress/policy
+```
+
+```sh
+curl https://api.iron.sh/v1/egress/policy \
+  -H "Authorization: Bearer $IRONS_API_KEY"
 ```
 
 **Response:** `200 OK`
@@ -273,6 +318,13 @@ PUT /v1/egress/policy
 | ------ | ------ | -------- | -------------------- |
 | `mode` | string | yes      | `enforce` or `warn`  |
 
+```sh
+curl -X PUT https://api.iron.sh/v1/egress/policy \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "enforce"}'
+```
+
 **Response:** `200 OK`
 
 Returns the updated policy object.
@@ -283,6 +335,11 @@ Returns the updated policy object.
 
 ```
 GET /v1/egress/rules
+```
+
+```sh
+curl https://api.iron.sh/v1/egress/rules \
+  -H "Authorization: Bearer $IRONS_API_KEY"
 ```
 
 **Query parameters:**
@@ -341,6 +398,17 @@ POST /v1/egress/rules
 | `cidr`    | string | no       | CIDR range to match (e.g. `10.0.0.0/8`). Provide `host` or `cidr`, not both.                  |
 | `comment` | string | no       | Optional human-readable note about the rule's purpose.                                         |
 
+```sh
+curl -X POST https://api.iron.sh/v1/egress/rules \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "github-api",
+    "host": "api.github.com",
+    "comment": "GitHub API access for code pulls"
+  }'
+```
+
 **Response:** `201 Created`
 
 Returns the created rule object.
@@ -353,6 +421,11 @@ Returns the created rule object.
 DELETE /v1/egress/rules/{rule_id}
 ```
 
+```sh
+curl -X DELETE https://api.iron.sh/v1/egress/rules/egr_9xm2kfp4 \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
 **Response:** `204 No Content`
 
 ---
@@ -363,6 +436,11 @@ DELETE /v1/egress/rules/{rule_id}
 
 ```
 GET /v1/audit/egress
+```
+
+```sh
+curl "https://api.iron.sh/v1/audit/egress?vm_id=vm_k3mf9xvw2p&verdict=denied&limit=20" \
+  -H "Authorization: Bearer $IRONS_API_KEY"
 ```
 
 **Query parameters:**
@@ -414,6 +492,10 @@ GET /v1/audit/egress
 POST /v1/auth/device/code
 ```
 
+```sh
+curl -X POST https://api.iron.sh/v1/auth/device/code
+```
+
 **Response:** `200 OK`
 
 ```json
@@ -437,6 +519,10 @@ GET /v1/auth/device/poll
 | Param  | Type   | Required | Description                              |
 | ------ | ------ | -------- | ---------------------------------------- |
 | `code` | string | yes      | The device code from the code request    |
+
+```sh
+curl "https://api.iron.sh/v1/auth/device/poll?code=ABCD-1234"
+```
 
 **Response:** `200 OK`
 
