@@ -275,7 +275,8 @@ Exactly one of `--host` or `--cidr` is required.
 
 ```sh
 irons egress add --host crates.io
-irons egress add --cidr 10.0.0.0/8 --name "internal network"
+irons egress add --cidr 10.0.0.0/8 --name "internal network" --comment "Allow internal traffic"
+irons egress add --host api.example.com --name "example api"
 ```
 
 ### `egress remove`

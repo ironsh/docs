@@ -30,7 +30,7 @@ All outbound traffic from a sandbox is routed through a network bridge that Iron
 The bridge inspects the hostname of every outbound connection attempt and records it in the egress audit log. This is how `irons audit egress` is able to show you every domain your workload has tried to reach, along with whether it was allowed or denied:
 
 ```sh
-irons audit egress my-sandbox --follow
+irons audit egress --vm my-sandbox --follow
 ```
 
 Because enforcement happens at the bridge level — outside the VM — a compromised workload cannot bypass egress controls by manipulating software inside the sandbox.
@@ -56,10 +56,10 @@ irons egress mode enforce    # enforce the allowlist
 Egress rules are host-based. You can allowlist a hostname, a raw IP address, or a CIDR range using the CLI:
 
 ```sh
-irons egress allow api.github.com
-irons egress allow pypi.org
-irons egress allow 203.0.113.42
-irons egress allow 10.0.0.0/8
+irons egress add --host api.github.com
+irons egress add --host pypi.org
+irons egress add --host 203.0.113.42
+irons egress add --cidr 10.0.0.0/8
 ```
 
 ### Default Egress Rules
@@ -95,7 +95,7 @@ irons egress list
 Default rules can be supplemented with your own entries (see [Allowlisting Hosts](#allowlisting-hosts)). They can also be removed via:
 
 ```sh
-irons egress remove
+irons egress remove <rule_id>
 ```
 
 ### SSH Access
@@ -103,7 +103,7 @@ irons egress remove
 Inbound SSH to a sandbox is routed through a bridge on the host machine. The bridge forwards connections on an assigned host port to port 22 inside the VM. Use `irons ssh --command` to get the exact host and port for a given sandbox:
 
 ```sh
-irons ssh --command my-sandbox
+irons ssh my-sandbox --command
 # e.g. ssh -p 32847 user@host.iron.sh
 ```
 
