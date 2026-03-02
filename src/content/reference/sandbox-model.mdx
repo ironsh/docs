@@ -62,6 +62,42 @@ irons egress allow 203.0.113.42
 irons egress allow 10.0.0.0/8
 ```
 
+### Default Egress Rules
+
+Every VM starts with a built-in allowlist of hosts and CIDR ranges that covers the registries, package managers, and services most workloads need. The defaults are organized into the following groups:
+
+| Group     | What's covered                                                                                                                                            |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub    | `github.com`, `ghcr.io`, `*.actions.githubusercontent.com`, and related hosts used for API access, package downloads, container pulls, and Git over HTTPS |
+| APT       | `mirrors.edge.kernel.org` and related Debian/Ubuntu mirrors                                                                                               |
+| Node      | `registry.npmjs.org`, `registry.yarnpkg.com`, `nodejs.org`, and related hosts                                                                             |
+| PyPI      | `pypi.org`, `*.pythonhosted.org`, and test/upload endpoints                                                                                               |
+| Go        | `proxy.golang.org`, `sum.golang.org`, `pkg.go.dev`, and related hosts                                                                                     |
+| Rust      | `crates.io`, `index.crates.io`, `sh.rustup.rs`, and related hosts                                                                                         |
+| Ruby      | `rubygems.org`, `index.rubygems.org`, `cache.ruby-lang.org`, and related hosts                                                                            |
+| Java      | `repo.maven.apache.org` and `repo1.maven.org`                                                                                                             |
+| Docker    | `registry-1.docker.io`, `auth.docker.io`, `quay.io`, and related registries                                                                               |
+| Ubuntu    | `security.ubuntu.com`, `*.archive.ubuntu.com`, and related Ubuntu infrastructure                                                                          |
+| OpenAI    | `api.openai.com`, `chatgpt.com`, and related hosts                                                                                                        |
+| Anthropic | `api.anthropic.com`, `claude.ai`, and related hosts                                                                                                       |
+| Homebrew  | `formulae.brew.sh`                                                                                                                                        |
+| Foundry   | `foundry.paradigm.xyz`                                                                                                                                    |
+| Misc.     | `mise.run`, `tuf-repo-cdn.sigstore.dev`, `www.example.com`, and a few others                                                                              |
+
+In addition to hostnames, a set of GitHub IP CIDR ranges is included by default to support Git operations over SSH.
+
+To view the full list of default hosts and CIDR ranges applied to your account, use the CLI:
+
+```sh
+irons egress list
+```
+
+Default rules can be supplemented with your own entries (see [Allowlisting Hosts](#allowlisting-hosts)). They can also be removed via:
+
+```sh
+irons egress remove
+```
+
 ### SSH Access
 
 Inbound SSH to a sandbox is routed through a bridge on the host machine. The bridge forwards connections on an assigned host port to port 22 inside the VM. Use `irons ssh --command` to get the exact host and port for a given sandbox:
