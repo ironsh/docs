@@ -120,6 +120,8 @@ curl -X POST https://api.iron.sh/v1/vms \
 }
 ```
 
+Once the VM is created, you can retrieve its details using the `GET /v1/vms/{id}` endpoint. You will need to poll that endpoint until the status is `running` and the `status_detail` is `ready` prior to connecting via SSH.
+
 ---
 
 ### List VMs
