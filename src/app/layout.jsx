@@ -22,7 +22,7 @@ export default async function RootLayout({ children }) {
           navbar={navbar}
           pageMap={await getPageMap()}
           footer={footer}
-          editLink={null}
+          docsRepositoryBase="https://github.com/ironsh/docs/tree/main"
         >
           {children}
         </Layout>
