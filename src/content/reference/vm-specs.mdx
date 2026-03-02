@@ -1,0 +1,218 @@
+---
+title: "VM Specifications"
+description: "Hardware specs, pre-installed packages, and runtime environments available in every Iron.sh dev environment."
+---
+
+# VM Specifications
+
+Every dev environment runs on a dedicated Ubuntu 24.04 (Noble) virtual machine backed by fast bare-metal hardware. This page describes the default hardware allocation and the software pre-installed on every VM.
+
+## Hardware
+
+| Resource | Default                  |
+| -------- | ------------------------ |
+| vCPUs    | 4                        |
+| RAM      | 8 GB                     |
+| Disk     | 64 GB                    |
+| OS       | Ubuntu 24.04 LTS (Noble) |
+
+Need more resources? Higher CPU and memory allocations are available on an as-needed basis — [contact us](mailto:matt@ironcd.com) to discuss your requirements.
+
+## APT Configuration
+
+The default APT mirror is set to **mirrors.kernel.org** instead of the standard Ubuntu mirrors. This sidesteps ongoing reliability issues with the canonical Ubuntu CDN and ensures fast, consistent package downloads during provisioning and inside your dev environments.
+
+## Pre-installed Software
+
+### System Packages
+
+The following packages are installed from APT on every VM.
+
+#### Core Build Tools
+
+| Package           | Description                           |
+| ----------------- | ------------------------------------- |
+| `build-essential` | GCC, make, and standard C/C++ headers |
+| `cmake`           | Cross-platform build system           |
+| `pkg-config`      | Library compile/link flag helper      |
+| `autoconf`        | Automatic configure script builder    |
+| `automake`        | Makefile generator                    |
+| `libtool`         | Generic library support script        |
+
+#### Version Control
+
+| Package   | Description                          |
+| --------- | ------------------------------------ |
+| `git`     | Distributed version control          |
+| `git-lfs` | Git extension for large file storage |
+
+#### Editors & Terminal Multiplexers
+
+| Package  | Description                           |
+| -------- | ------------------------------------- |
+| `vim`    | Vi IMproved                           |
+| `neovim` | Hyperextensible Vim-based text editor |
+| `tmux`   | Terminal multiplexer                  |
+| `screen` | Full-screen window manager            |
+
+#### Networking & Debugging
+
+| Package          | Description                             |
+| ---------------- | --------------------------------------- |
+| `curl`           | HTTP/HTTPS client                       |
+| `wget`           | Non-interactive file downloader         |
+| `net-tools`      | `ifconfig`, `netstat`, and friends      |
+| `iproute2`       | `ip`, `ss`, and modern networking tools |
+| `dnsutils`       | `dig`, `nslookup`                       |
+| `traceroute`     | Network path tracer                     |
+| `mtr`            | Combined ping + traceroute              |
+| `tcpdump`        | Packet capture                          |
+| `nmap`           | Network scanner                         |
+| `openssh-client` | SSH client                              |
+| `openssh-server` | SSH server                              |
+| `socat`          | Multipurpose relay                      |
+
+#### JSON & Data Tools
+
+| Package      | Description                  |
+| ------------ | ---------------------------- |
+| `jq`         | Command-line JSON processor  |
+| `xmlstarlet` | XML command-line toolkit     |
+| `sqlite3`    | Embedded relational database |
+
+#### Compression & Archives
+
+| Package         | Description               |
+| --------------- | ------------------------- |
+| `zip` / `unzip` | ZIP archives              |
+| `tar`           | Tape archive utility      |
+| `gzip`          | GNU zip compression       |
+| `bzip2`         | bzip2 compression         |
+| `xz-utils`      | XZ/LZMA compression       |
+| `p7zip-full`    | 7-Zip archiver            |
+| `rsync`         | Fast file synchronization |
+| `zstd`          | Zstandard compression     |
+
+#### System & Process Tools
+
+| Package   | Description                                          |
+| --------- | ---------------------------------------------------- |
+| `htop`    | Interactive process viewer                           |
+| `btop`    | Resource monitor                                     |
+| `strace`  | System call tracer                                   |
+| `ltrace`  | Library call tracer                                  |
+| `lsof`    | List open files                                      |
+| `sysstat` | Performance monitoring tools (`iostat`, `sar`, etc.) |
+| `tree`    | Directory tree viewer                                |
+| `fd-find` | Fast alternative to `find`                           |
+| `ripgrep` | Fast alternative to `grep`                           |
+| `fzf`     | Fuzzy finder                                         |
+
+#### TLS & Cryptography
+
+| Package           | Description            |
+| ----------------- | ---------------------- |
+| `openssl`         | TLS toolkit            |
+| `ca-certificates` | Common CA certificates |
+| `gnupg`           | GNU Privacy Guard      |
+
+#### Common Build Libraries
+
+| Package                | Description                        |
+| ---------------------- | ---------------------------------- |
+| `libssl-dev`           | OpenSSL development headers        |
+| `libffi-dev`           | Foreign function interface library |
+| `zlib1g-dev`           | zlib development headers           |
+| `libreadline-dev`      | Readline development headers       |
+| `libsqlite3-dev`       | SQLite development headers         |
+| `libcurl4-openssl-dev` | libcurl development headers        |
+
+#### Miscellaneous
+
+| Package                      | Description                         |
+| ---------------------------- | ----------------------------------- |
+| `software-properties-common` | `add-apt-repository` helper         |
+| `apt-transport-https`        | APT HTTPS transport                 |
+| `locales`                    | Locale data                         |
+| `sudo`                       | Privilege escalation                |
+| `less`                       | Pager                               |
+| `file`                       | File type detection                 |
+| `patch`                      | Apply diff patches                  |
+| `direnv`                     | Per-directory environment variables |
+| `shellcheck`                 | Shell script linter                 |
+| `man-db`                     | Man page viewer                     |
+
+### Docker
+
+Docker Engine is installed and available on every VM.
+
+### Python
+
+| Package              | Description                                          |
+| -------------------- | ---------------------------------------------------- |
+| `python3`            | Python 3 interpreter                                 |
+| `python3-pip`        | pip package installer                                |
+| `python3-venv`       | venv module for virtual environments                 |
+| `python3-dev`        | Python development headers                           |
+| `python3-setuptools` | setuptools                                           |
+| `python3-wheel`      | wheel support                                        |
+| `pipx`               | Install Python applications in isolated environments |
+
+### GitHub CLI
+
+`gh` is installed from the [official GitHub CLI APT repository](https://cli.github.com/).
+
+### just
+
+[`just`](https://github.com/casey/just) is a command runner (similar to `make`) installed from the GitHub CLI repository.
+
+### Node.js
+
+Node.js is managed via **[fnm](https://github.com/Schniz/fnm)** (Fast Node Manager), installed for the `ubuntu` user. The latest LTS release is pre-installed.
+
+### OpenAI Codex
+
+[OpenAI Codex](https://github.com/openai/codex) is installed globally via npm for the `ubuntu` user.
+
+### Claude Code
+
+[Claude Code](https://claude.ai/code) is installed for the `ubuntu` user via the official installer.
+
+### Go
+
+Go is installed to `/usr/local/go`. The `GOPATH` is configured automatically in the `ubuntu` user's shell.
+
+### mise
+
+[mise](https://mise.jdx.dev/) is installed for the `ubuntu` user and is used to manage additional language runtimes.
+
+### Ruby
+
+Ruby 3 is installed via `mise` using precompiled binaries.
+
+### Rust
+
+Rust is installed for the `ubuntu` user via [`rustup`](https://rustup.rs/). Both `cargo` and `rustup` are available on the `PATH`.
+
+### Foundry
+
+The full [Foundry](https://getfoundry.sh/) toolchain is installed for the `ubuntu` user via `foundryup`:
+
+| Tool     | Description                          |
+| -------- | ------------------------------------ |
+| `forge`  | Ethereum testing framework           |
+| `cast`   | Swiss-army knife for EVM interaction |
+| `anvil`  | Local Ethereum node                  |
+| `chisel` | Solidity REPL                        |
+
+## PATH & Shell Integration
+
+The `ubuntu` user's `.bashrc` is pre-configured with the following `PATH` entries and shell integrations so all tools are immediately available in interactive and non-interactive shells:
+
+```sh
+export PATH="/usr/local/go/bin:$HOME/.local/bin:$HOME/.foundry/bin:$HOME/.local/share/fnm:$HOME/.cargo/bin:$PATH"
+export GOPATH="$(go env GOPATH)"
+export PATH="$GOPATH/bin:$PATH"
+eval "$(mise activate bash)"
+eval "$(fnm env --use-on-cd)"
+```

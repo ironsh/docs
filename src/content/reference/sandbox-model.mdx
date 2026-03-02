@@ -17,13 +17,13 @@ All outbound traffic from a sandbox is routed through a network bridge that Iron
 
 ### Traffic Rules
 
-| Traffic Type          | Default Behavior                                       |
-| --------------------- | ------------------------------------------------------ |
-| Inbound SSH (TCP 22)  | Allowed via bridge from host to VM                     |
-| Outbound SSH (TCP 22) | Allowed only to manually whitelisted IP addresses [^1] |
-| ICMP (ping)           | Allowed                                                |
-| HTTPS / other TCP     | Allowed or blocked based on egress rules               |
-| All other traffic     | Blocked                                                |
+| Traffic Type          | Default Behavior                                    |
+| --------------------- | --------------------------------------------------- |
+| Inbound SSH (TCP 22)  | Allowed via bridge from host to VM                  |
+| Outbound SSH (TCP 22) | Allowed only to manually whitelisted IP ranges [^1] |
+| ICMP (ping)           | Allowed                                             |
+| HTTPS / other TCP     | Allowed or blocked based on egress rules            |
+| All other traffic     | Blocked                                             |
 
 ### Egress Observation
 
@@ -39,28 +39,28 @@ Because enforcement happens at the bridge level — outside the VM — a comprom
 
 Egress rules can operate in two modes:
 
-| Mode   | Behavior                                                          |
-| ------ | ----------------------------------------------------------------- |
-| `warn` | All outbound connections are permitted, but violations are logged |
-| `deny` | Outbound connections to non-allowlisted domains are blocked       |
+| Mode      | Behavior                                                          |
+| --------- | ----------------------------------------------------------------- |
+| `warn`    | All outbound connections are permitted, but violations are logged |
+| `enforce` | Outbound connections to non-allowlisted domains are blocked       |
 
-Use `warn` mode when you're first profiling a workload to discover which domains it reaches. Switch to `deny` once you've built a precise allowlist.
+Use `warn` mode when you're first profiling a workload to discover which domains it reaches. Switch to `enforce` once you've built a precise allowlist.
 
 ```sh
-irons egress mode warn    # observe without blocking
-irons egress mode deny    # enforce the allowlist
+irons egress mode warn       # observe without blocking
+irons egress mode enforce    # enforce the allowlist
 ```
 
-### Allowlisting Domains
+### Allowlisting Hosts
 
-Egress rules are domain-based. You add domains to your allowlist using the CLI:
+Egress rules are host-based. You can allowlist a hostname, a raw IP address, or a CIDR range using the CLI:
 
 ```sh
 irons egress allow api.github.com
 irons egress allow pypi.org
+irons egress allow 203.0.113.42
+irons egress allow 10.0.0.0/8
 ```
-
-Raw IP addresses are not supported as egress destinations. If a service only exposes an IP, create a DNS record for it and allowlist that hostname instead.
 
 ### SSH Access
 
@@ -73,9 +73,9 @@ irons ssh --command my-sandbox
 
 The SSH key you provide at creation time (`--key`, defaulting to `~/.ssh/id_rsa.pub`) is the only credential accepted.
 
-For outbound SSH from the sandbox (for example, to push to a Git remote over SSH), the destination IP address must be manually whitelisted. Contact [support@iron.sh](mailto:support@iron.sh) for assistance.
+For outbound SSH from the sandbox (for example, to push to a Git remote over SSH), the destination must be manually whitelisted by IP address or CIDR range. Domain-based egress rules do not apply to SSH traffic because the SSH client resolves DNS before opening the TCP connection, so by the time the bridge sees the traffic there is no hostname to match against — only an IP address.
 
-[^1]: Outbound SSH destinations must be whitelisted by IP address, not by domain. Domain-based egress rules do not apply to SSH traffic.
+[^1]: Outbound SSH destinations must be whitelisted by IP address or CIDR range, not by domain. The SSH client resolves DNS before making the TCP connection, so the bridge only ever sees an IP address for SSH traffic.
 
 ### ICMP
 
