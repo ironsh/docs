@@ -376,3 +376,101 @@ irons audit egress --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z
 ```
 
 > **Tip:** Run `irons audit egress --vm my-sandbox --follow` while your egress mode is set to `warn` to observe which domains your agent is reaching before switching to `enforce`. This makes it easy to build a precise allowlist without trial and error.
+
+---
+
+## `secrets`
+
+Manage secrets for your account. Secrets are credentials (e.g. API tokens) that are securely stored and made available to sandboxes as environment variables via proxy values. The secret value is never displayed by any subcommand.
+
+Commands that accept `<name|id>` resolve the argument as a secret ID if it starts with `sec_`, otherwise as a name.
+
+### `secrets list`
+
+List all secrets on the account.
+
+```
+irons secrets list
+```
+
+Displays a table with name, provider, env var, proxy value, and creation date.
+
+### `secrets add`
+
+Add a new secret.
+
+```
+irons secrets add [flags]
+```
+
+| Flag        | Required | Description                                         |
+| ----------- | -------- | --------------------------------------------------- |
+| `--name`    | yes      | Human-readable name for the secret                  |
+| `--provider`| yes      | Provider: `github`, `npm`                           |
+| `--env-var` | yes      | Environment variable name to set inside sandboxes   |
+| `--secret`  | no       | The secret value. If omitted, prompts interactively |
+| `--comment` | no       | Optional note about the secret's purpose            |
+
+When `--secret` is not provided, the CLI prompts for the value with echo disabled and asks for confirmation. If stdin is piped, it reads a single line.
+
+**Examples**
+
+```sh
+irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN --secret ghp_abc123
+irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN
+echo "ghp_abc123" | irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN
+```
+
+### `secrets show`
+
+Show details of a single secret by name or ID.
+
+```
+irons secrets show <name|id>
+```
+
+**Examples**
+
+```sh
+irons secrets show github-main
+irons secrets show sec_m4xk9wp2
+```
+
+### `secrets update`
+
+Update a secret's value, environment variable, or comment.
+
+```
+irons secrets update <name|id> [flags]
+```
+
+| Flag        | Description                                                   |
+| ----------- | ------------------------------------------------------------- |
+| `--secret`  | New secret value. If no flags are provided, prompts for this  |
+| `--env-var` | Updated environment variable name                             |
+| `--comment` | Updated comment                                               |
+
+If no flags are set, the CLI prompts interactively for a new secret value.
+
+**Examples**
+
+```sh
+irons secrets update github-main --secret ghp_newtoken789
+irons secrets update github-main --env-var GH_TOKEN
+irons secrets update github-main
+```
+
+### `secrets remove`
+
+Remove a secret by name or ID.
+
+```
+irons secrets remove <name|id>
+```
+
+**Examples**
+
+```sh
+irons secrets remove github-main
+irons secrets remove sec_m4xk9wp2
+```

@@ -30,6 +30,7 @@ All resources use prefixed, opaque IDs:
 | VM           | `vm_`  | `vm_k3mf9xvw2p` |
 | Egress Rule  | `egr_` | `egr_9xm2kfp4`  |
 | Egress Event | `ee_`  | `ee_w8n3vqx1`   |
+| Secret       | `sec_` | `sec_m4xk9wp2`  |
 
 ### Pagination
 
@@ -483,6 +484,178 @@ curl "https://api.iron.sh/v1/audit/egress?vm_id=vm_k3mf9xvw2p&verdict=denied&lim
   "cursor": "ee_p3xn7vm2"
 }
 ```
+
+---
+
+## Secrets
+
+Secrets let you store credentials for supported providers. The egress proxy injects real secrets into outbound requests on behalf of workloads, so the workload never sees the actual credential. Instead, workloads use a `proxy_value` placeholder in environment variables, and the proxy swaps it for the real secret at the network level.
+
+Secrets are scoped to the authenticated user. The secret value itself is write-only — it is never returned by any endpoint.
+
+### Create a Secret
+
+```
+POST /v1/secrets
+```
+
+**Request body:**
+
+| Field     | Type   | Required | Description                                                                                                                                  |
+| --------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`    | string | yes      | Unique human-readable identifier. Alphanumeric, hyphens, underscores only. Max 64 characters.                                                |
+| `provider`| string | yes      | The service this secret is for. One of: `github`, `npm`.                                                                                     |
+| `secret`  | string | yes      | The secret value. Encrypted at rest. Never returned in responses.                                                                            |
+| `env_var` | string | yes      | Environment variable name to set inside sandboxes (e.g. `GITHUB_TOKEN`). Must be uppercase letters, digits, and underscores, starting with a letter. Must be unique within the user's secrets. |
+| `comment` | string | no       | Human-readable note about the secret's purpose.                                                                                              |
+
+```sh
+curl -X POST https://api.iron.sh/v1/secrets \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "github-main",
+    "provider": "github",
+    "secret": "ghp_abc123def456...",
+    "env_var": "GITHUB_TOKEN"
+  }'
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "id": "sec_m4xk9wp2",
+  "name": "github-main",
+  "provider": "github",
+  "env_var": "GITHUB_TOKEN",
+  "proxy_value": "IRONSH_PROXY_github_github-main",
+  "comment": null,
+  "created_at": "2026-03-04T12:00:00Z",
+  "updated_at": "2026-03-04T12:00:00Z"
+}
+```
+
+The `proxy_value` field is the placeholder that gets set as the value of the environment variable inside sandboxes. The egress proxy replaces it with the real secret on outbound requests to the provider's hosts. The `proxy_value` is safe to expose — it is meaningless outside the proxy.
+
+Creating a secret with a duplicate `name` returns `409 Conflict` with code `secret_name_taken`. Creating a secret with a duplicate `env_var` returns `409 Conflict`. Creating a secret with an unsupported provider returns `422` with code `validation_error`.
+
+---
+
+### List Secrets
+
+```
+GET /v1/secrets
+```
+
+**Query parameters:**
+
+| Param      | Type    | Default      | Description                                    |
+| ---------- | ------- | ------------ | ---------------------------------------------- |
+| `provider` | string  | —            | Filter by provider                             |
+| `name`     | string  | —            | Filter by exact name match                     |
+| `cursor`   | string  | —            | Pagination cursor from previous response       |
+| `limit`    | integer | `50`         | Results per page. Max 200.                     |
+| `sort`     | string  | `created_at` | Sort field: `created_at`, `name`, `provider`   |
+| `order`    | string  | `desc`       | Sort order: `asc`, `desc`                      |
+
+```sh
+curl https://api.iron.sh/v1/secrets \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": "sec_m4xk9wp2",
+      "name": "github-main",
+      "provider": "github",
+      "env_var": "GITHUB_TOKEN",
+      "proxy_value": "IRONSH_PROXY_github_github-main",
+      "comment": null,
+      "created_at": "2026-03-04T12:00:00Z",
+      "updated_at": "2026-03-04T12:00:00Z"
+    }
+  ],
+  "has_more": false,
+  "cursor": null
+}
+```
+
+---
+
+### Get a Secret
+
+```
+GET /v1/secrets/{secret_id}
+```
+
+```sh
+curl https://api.iron.sh/v1/secrets/sec_m4xk9wp2 \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "sec_m4xk9wp2",
+  "name": "github-main",
+  "provider": "github",
+  "env_var": "GITHUB_TOKEN",
+  "proxy_value": "IRONSH_PROXY_github_github-main",
+  "comment": null,
+  "created_at": "2026-03-04T12:00:00Z",
+  "updated_at": "2026-03-04T12:00:00Z"
+}
+```
+
+---
+
+### Update a Secret
+
+```
+PATCH /v1/secrets/{secret_id}
+```
+
+All fields are optional. Only provided fields are updated. `name` and `provider` cannot be changed after creation — delete and recreate instead.
+
+**Request body:**
+
+| Field     | Type   | Required | Description                    |
+| --------- | ------ | -------- | ------------------------------ |
+| `secret`  | string | no       | New secret value.              |
+| `env_var` | string | no       | Updated environment variable name. |
+| `comment` | string | no       | Updated comment.               |
+
+```sh
+curl -X PATCH https://api.iron.sh/v1/secrets/sec_m4xk9wp2 \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"secret": "ghp_newtoken789..."}'
+```
+
+**Response:** `200 OK`
+
+Returns the updated secret object (without the secret value).
+
+---
+
+### Delete a Secret
+
+```
+DELETE /v1/secrets/{secret_id}
+```
+
+```sh
+curl -X DELETE https://api.iron.sh/v1/secrets/sec_m4xk9wp2 \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `204 No Content`
 
 ---
 
