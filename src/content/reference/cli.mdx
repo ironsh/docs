@@ -166,14 +166,17 @@ irons destroy my-sandbox --force
 
 ## `ssh`
 
-Open an interactive SSH session in a sandbox.
+Open an interactive SSH session in a sandbox, or run a remote command.
+
+Any arguments after the sandbox identifier are forwarded to the remote host as the command to execute, mimicking native `ssh` behavior.
 
 ```
-irons ssh <name|id> [flags]
+irons ssh <name|id> [command...] [flags]
 ```
 
 | Flag                | Description                                           |
 | ------------------- | ----------------------------------------------------- |
+| `--tty`, `-t`       | Force pseudo-TTY allocation (useful for interactive commands like `tmux`) |
 | `--command`, `-c`   | Print the SSH command instead of executing it         |
 | `--strict-hostkeys` | Enable strict host key checking (disabled by default) |
 
@@ -181,6 +184,9 @@ irons ssh <name|id> [flags]
 
 ```sh
 irons ssh my-sandbox
+irons ssh my-sandbox ls -la
+irons ssh -t my-sandbox tmux
+irons ssh my-sandbox -- ls -la
 irons ssh my-sandbox --command
 ```
 
