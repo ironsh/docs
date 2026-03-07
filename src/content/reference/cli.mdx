@@ -381,7 +381,7 @@ irons audit egress --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z
 
 ## `secrets`
 
-Manage secrets for your account. Secrets are credentials (e.g. API tokens) that are securely stored and made available to sandboxes as environment variables via proxy values. The secret value is never displayed by any subcommand.
+Manage secrets for your account. Secrets are credentials (e.g. API tokens) that are securely stored and made available to sandboxes as environment variables via proxy values. The egress proxy scans all outbound HTTP headers for known proxy values and replaces them with real secrets. The secret value is never displayed by any subcommand.
 
 Commands that accept `<name|id>` resolve the argument as a secret ID if it starts with `sec_`, otherwise as a name.
 
@@ -393,7 +393,11 @@ List all secrets on the account.
 irons secrets list
 ```
 
-Displays a table with name, provider, env var, proxy value, and creation date.
+Displays a table with columns: `NAME`, `ENV_VAR`, `HOSTS`, `PROXY_VALUE`, `CREATED`.
+
+The `HOSTS` column displays `*` for unrestricted, or a comma-separated list for scoped secrets.
+
+Never displays the secret value.
 
 ### `secrets add`
 
@@ -403,61 +407,63 @@ Add a new secret.
 irons secrets add [flags]
 ```
 
-| Flag        | Required | Description                                         |
-| ----------- | -------- | --------------------------------------------------- |
-| `--name`    | yes      | Human-readable name for the secret                  |
-| `--provider`| yes      | Provider: `github`, `npm`                           |
-| `--env-var` | yes      | Environment variable name to set inside sandboxes   |
-| `--secret`  | no       | The secret value. If omitted, prompts interactively |
-| `--comment` | no       | Optional note about the secret's purpose            |
+| Flag        | Required | Description                                                                       |
+| ----------- | -------- | --------------------------------------------------------------------------------- |
+| `--name`    | yes      | Human-readable name (e.g. `github-main`)                                          |
+| `--env-var` | yes      | Env var name to set in sandboxes (e.g. `GITHUB_TOKEN`)                            |
+| `--secret`  | no       | The secret value. If omitted, prompts interactively with hidden input.            |
+| `--host`    | no       | Host to scope to. Can be specified multiple times. Defaults to `*` (any host).    |
+| `--comment` | no       | Optional note                                                                     |
 
-When `--secret` is not provided, the CLI prompts for the value with echo disabled and asks for confirmation. If stdin is piped, it reads a single line.
+If `--secret` is not provided, the CLI prompts for the secret value with echo disabled, then prompts for confirmation. If stdin is piped, reads the secret from stdin.
 
 **Examples**
 
 ```sh
-irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN --secret ghp_abc123
-irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN
-echo "ghp_abc123" | irons secrets add --name github-main --provider github --env-var GITHUB_TOKEN
+# Simple — inject everywhere, prompt for secret
+irons secrets add --name github-main --env-var GITHUB_TOKEN
+
+# With secret on command line
+irons secrets add --name github-main --env-var GITHUB_TOKEN --secret ghp_abc123
+
+# Scoped to specific hosts
+irons secrets add --name github-main --env-var GITHUB_TOKEN --host api.github.com --host "*.github.com"
+
+# Piped
+echo "ghp_abc123" | irons secrets add --name github-main --env-var GITHUB_TOKEN
 ```
 
 ### `secrets show`
 
-Show details of a single secret by name or ID.
+Show details of a single secret.
 
 ```
 irons secrets show <name|id>
 ```
 
-**Examples**
-
-```sh
-irons secrets show github-main
-irons secrets show sec_m4xk9wp2
-```
+Displays the secret's metadata: name, env var, hosts, proxy value, comment, and timestamps. Never displays the secret value.
 
 ### `secrets update`
 
-Update a secret's value, environment variable, or comment.
+Update a secret.
 
 ```
 irons secrets update <name|id> [flags]
 ```
 
-| Flag        | Description                                                   |
-| ----------- | ------------------------------------------------------------- |
-| `--secret`  | New secret value. If no flags are provided, prompts for this  |
-| `--env-var` | Updated environment variable name                             |
-| `--comment` | Updated comment                                               |
-
-If no flags are set, the CLI prompts interactively for a new secret value.
+| Flag        | Description                                                                        |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `--secret`  | New secret value. If omitted and no other flags given, prompts interactively.       |
+| `--env-var` | Updated env var name                                                               |
+| `--host`    | Updated host scoping. Can be specified multiple times. Replaces existing hosts.     |
+| `--comment` | Updated comment                                                                    |
 
 **Examples**
 
 ```sh
 irons secrets update github-main --secret ghp_newtoken789
-irons secrets update github-main --env-var GH_TOKEN
-irons secrets update github-main
+irons secrets update github-main  # prompts for new secret value
+irons secrets update github-main --host api.github.com --host "*.github.com"
 ```
 
 ### `secrets remove`
