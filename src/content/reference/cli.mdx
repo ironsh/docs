@@ -60,6 +60,7 @@ irons create <name> [flags]
 | Flag          | Default                     | Description                                                    |
 | ------------- | --------------------------- | -------------------------------------------------------------- |
 | `--key`, `-k` | first key found in `~/.ssh` | Path to an SSH public key to install on the sandbox            |
+| `--snapshot`  |                             | Create the sandbox from a snapshot ID                          |
 | `--async`     |                             | Return immediately without waiting for the sandbox to be ready |
 
 If `--key` is not provided, the following key files are checked in order and the first one found is used:
@@ -77,6 +78,7 @@ By default the command blocks until the sandbox reaches the `ready` state.
 ```sh
 irons create my-sandbox
 irons create my-sandbox --key ~/.ssh/agent.pub
+irons create my-sandbox --snapshot snap_x9f2km4p
 irons create my-sandbox --async
 ```
 
@@ -485,4 +487,120 @@ irons secrets remove <name|id>
 ```sh
 irons secrets remove github-main
 irons secrets remove sec_m4xk9wp2
+```
+
+---
+
+## `snapshots`
+
+Manage VM snapshots. Snapshots capture a VM's overlay at a point in time with zero downtime. Restoring a snapshot creates a new VM — the original is untouched.
+
+### `snapshots create`
+
+Create a snapshot of the specified VM. The snapshot is taken with zero downtime. The VM is not affected if the upload fails.
+
+```
+irons snapshots create <name|id> [flags]
+```
+
+| Flag               | Description                        |
+| ------------------ | ---------------------------------- |
+| `--label`          | Optional label for the snapshot    |
+| `--wait`           | Wait for the snapshot to be ready  |
+| `--json`           | Output raw JSON                    |
+
+By default the command returns immediately after the API accepts the request. Use `--wait` to poll until the snapshot reaches `ready` or `failed`. While waiting, the CLI displays the current snapshot status (`pending`, `generating`, `uploading`) as it progresses.
+
+Snapshot statuses: `pending` → `generating` → `uploading` → `ready` (or `failed`, `deleted`)
+
+**Examples**
+
+```sh
+irons snapshots create my-dev-env
+irons snapshots create my-dev-env --label pre-refactor
+irons snapshots create vm_k3mf9xvw2p --wait
+irons snapshots create my-dev-env --json
+```
+
+### `snapshots list`
+
+List snapshots. Without a VM argument, lists all snapshots across VMs (includes a VM column). With a VM argument, lists only snapshots for that VM.
+
+```
+irons snapshots list [<name|id>]
+```
+
+| Flag     | Description     |
+| -------- | --------------- |
+| `--json` | Output raw JSON |
+
+**Examples**
+
+```sh
+irons snapshots list
+irons snapshots list my-dev-env
+irons snapshots list vm_k3mf9xvw2p --json
+```
+
+### `snapshots get`
+
+Show detailed information about a snapshot, including ID, label, source VM, status, base image (if any), and creation time.
+
+```
+irons snapshots get <snapshot-id>
+```
+
+| Flag     | Description     |
+| -------- | --------------- |
+| `--json` | Output raw JSON |
+
+**Examples**
+
+```sh
+irons snapshots get snap_x9f2km4p
+irons snapshots get snap_x9f2km4p --json
+```
+
+### `snapshots delete`
+
+Delete a snapshot. This cannot be undone. Prompts for confirmation unless `--force` is passed.
+
+```
+irons snapshots delete <snapshot-id>
+```
+
+| Flag      | Description              |
+| --------- | ------------------------ |
+| `--force` | Skip confirmation prompt |
+
+**Examples**
+
+```sh
+irons snapshots delete snap_x9f2km4p
+irons snapshots delete snap_x9f2km4p --force
+```
+
+---
+
+## `fork`
+
+Fork a VM by creating a snapshot and then spinning up a new VM from it. This is a convenience command that combines `snapshots create --wait` and `create --snapshot` into a single step. The snapshot is taken with zero downtime — the source VM is not affected.
+
+```
+irons fork <name|id> [flags]
+```
+
+| Flag                | Default                                  | Description                                                |
+| ------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `--fork-name`       | `<vm-name>-fork-<snapshot-id>`           | Name for the forked VM                                     |
+| `--key`, `-k`       | first key found in `~/.ssh`              | SSH public key path (auto-detected from `~/.ssh/` by default) |
+
+The command waits for both the snapshot and the new VM to be ready before returning.
+
+**Examples**
+
+```sh
+irons fork my-dev-env
+irons fork my-dev-env --fork-name my-dev-env-copy
+irons fork my-dev-env --fork-name copy --key ~/.ssh/id_rsa.pub
 ```
