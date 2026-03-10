@@ -1,0 +1,66 @@
+---
+title: "Snapshots"
+description: "How Iron.sh snapshots work — capturing, restoring, and forking VM state."
+---
+
+# Snapshots
+
+Snapshots capture the disk state of a running VM at a point in time. You can use them to save checkpoints, duplicate environments, or roll back to a known-good state.
+
+## How It Works
+
+When you take a snapshot, Iron.sh flushes pending writes and captures a crash-consistent disk image that captures the state of the VM. This is fine for most workloads, but if you are running something IO-sensitive like a database, you should take care to ensure your data is in a consistent state before snapshotting. The VM continues running throughout with no downtime.
+
+You can take as many snapshots of a VM as you want. Each snapshot can be given an optional label to help you identify it later.
+
+A snapshot is always linked to its source: either the base image the VM was originally created from, or the snapshot the VM was restored from. This forms a chain you can trace back to the original image.
+
+## Creating a Snapshot
+
+```sh
+irons snapshots create my-dev-env --label before-refactor
+```
+
+The command returns immediately after the API accepts the request. Use `--wait` to block until the snapshot reaches `ready`:
+
+```sh
+irons snapshots create my-dev-env --label before-refactor --wait
+```
+
+You can list snapshots for a specific VM or across all VMs:
+
+```sh
+irons snapshots list my-dev-env
+irons snapshots list
+```
+
+## Restoring from a Snapshot
+
+Restoring a snapshot creates a **new VM** that boots from the captured state. The original VM is untouched.
+
+```sh
+# Find the snapshot you want
+irons snapshots list my-dev-env
+
+# Create a new VM from it
+irons create my-restored-env --snapshot snap_x9f2km4p
+```
+
+The new VM starts with the same disk contents as the original had at the moment the snapshot was taken.
+
+## Forking
+
+The `fork` command combines snapshotting and restoring into a single step. It takes a snapshot of the source VM, waits for it to be ready, then creates a new VM from it:
+
+```sh
+irons fork my-dev-env
+irons fork my-dev-env --fork-name my-dev-env-copy
+```
+
+This is the fastest way to duplicate a running environment. See the [`fork` CLI reference](/reference/cli#fork) for all available flags.
+
+## Further Reading
+
+- [Snapshots API reference](/reference/api#snapshots) — create, list, get, and delete snapshots via the REST API.
+- [Snapshots CLI reference](/reference/cli#snapshots) — manage snapshots from the command line.
+- [`fork` CLI reference](/reference/cli#fork) — one-command VM duplication.

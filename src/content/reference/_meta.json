@@ -1,6 +1,7 @@
 {
   "cli": "CLI Reference",
   "sandbox-model": "Sandbox Model",
+  "snapshots": "Snapshots",
   "secret-proxying": "Secret Proxying",
   "vm-specs": "VM Specifications"
 }
