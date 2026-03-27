@@ -1,72 +1,80 @@
 ---
-title: "Overview"
+title: "Overview & Quickstart"
 description: "Learn what Iron.sh is, how it works, and how to get started."
 ---
 
+import { Steps } from "nextra/components";
+
 # Overview
 
-Iron.sh provides egress-secured cloud VMs — called **sandboxes** — designed for use with AI agents. Using the `irons` CLI, you can spin up isolated, SSH-accessible environments with fine-grained control over outbound network traffic, giving an agent a real machine to work in without giving it unfettered internet access.
+Iron.sh gives AI coding agents hardened dev environments: real machines with controlled network access, transparent secrets proxying, full egress audit logs, and instant snapshot/rollback.
 
-The goal is simple: **let your agents do their job without exposing your infrastructure to the open internet.**
+AI coding agents install packages, run builds, and call APIs. That means real network access, real credentials, and real exposure to prompt injection, data exfiltration, and unauthorized outbound calls. Iron.sh is the infrastructure layer that makes this safe by default.
 
-## How It Works
+## Features
 
-Each sandbox is a cloud VM provisioned through the Iron.sh API. Egress rules are enforced at the network level — you allowlist only the domains an agent needs to reach (such as a package registry or an internal API) and everything else is blocked. Rules can also be set to `warn` mode, which logs violations without blocking them, making it easy to audit traffic before locking things down.
+**Secrets proxying.** Agents never see real credentials. You store secrets in Iron.sh and they're injected at the network layer when the agent makes an outbound request. Inside the environment, the agent only sees a proxy token. It can't log, leak, or exfiltrate the real key.
 
-Getting started takes minutes:
+**Default-deny egress.** Every outbound connection is policy-controlled. You allowlist the domains an agent needs (package registries, APIs, git hosts) and everything else is blocked. Rules can also be set to `warn` mode to audit traffic before locking things down.
+
+**Snapshot, rollback, and fork.** Checkpoint your environment before a risky run. If the agent breaks something, restore in seconds. Fork a snapshot to try a different approach in parallel.
+
+**Full audit logging.** Every outbound connection is logged with host, path, method, response code, bytes transferred, and which secrets were injected. You know exactly what your agent did.
+
+**Persistent, long-running environments.** No 24-hour walls. Environments persist for hours, days, or weeks. Installed packages, config, and working state survive restarts. Your agent picks up where it left off.
+
+## Quickstart
+
+Before you begin, make sure you're running macOS or Linux. Windows is not currently supported.
+
+<Steps>
+
+### Step 1: Install the CLI
+
+The quickest way to install `irons` is via the install script. It downloads the latest release, validates its SHA-256 checksum, and places the binary on your `$PATH`:
 
 ```sh
-# Create a sandbox and wait until it's ready
-irons create my-agent-sandbox
-
-# SSH in
-irons ssh my-agent-sandbox
-
-# When done, tear it down
-irons destroy my-agent-sandbox
+curl -fsSL https://install.iron.sh | bash
 ```
 
-## Typical Agent Workflow
+### Step 2: Onboard
 
-1. **Provision** a sandbox with the SSH key your agent will use:
+Next, onboard with a single command:
 
-   ```sh
-   irons create agent-run-42 --key ~/.ssh/agent.pub
-   ```
+```sh
+irons onboard
+```
 
-2. **Lock down egress** to only what the agent should reach:
+This command will create an iron.sh account and API key for you, create GitHub and coding harness secrets, and provision a new [agent](./getting-started/coding-agents.mdx) for you to use.
 
-   ```sh
-   irons egress mode deny
-   irons egress allow api.openai.com
-   irons egress allow pypi.org
-   ```
+![Image of irons onboard](/images/tui-onboard.png)
 
-3. **Connect** your agent using the SSH command output:
+### Step 3: Use your Agent
 
-   ```sh
-   irons ssh --command agent-run-42
-   ```
+You're now ready to use your agent! Your GitHub repo is automatically cloned, so you can get started right away. The previous command will drop you into a TUI for interacting with your agent, and managing egress rules. If it didn't, run `irons agents attach <agent-name>`.
 
-4. **Monitor** outbound traffic in real time:
+![Image of default TUI screen](/images/tui-default.png)
 
-   ```sh
-   irons audit egress my-agent-sandbox --follow
-   ```
+To monitor your agent's egress attempts and allow/deny them in real time, press `Ctrl-]` to flip over to the egress monitoring pane:
 
-5. **Tear down** when the run is complete:
-   ```sh
-   irons destroy --force agent-run-42
-   ```
+![Image of default TUI screen](/images/tui-egress.png)
+
+### Step 4: Tear Down the Agent
+
+When you're done, destroy the agent and clean up all associated resources:
+
+```sh
+irons agents destroy <agent-name>
+```
+
+</Steps>
 
 ## Next Steps
-
-Check out the docs below to help you get started:
 
 import { Cards } from "nextra/components";
 
 <Cards>
-  <Cards.Card title="Quickstart" href="/getting-started/quickstart" arrow />
   <Cards.Card title="CLI Reference" href="/reference/cli" arrow />
   <Cards.Card title="Egress Rules" href="/reference/egress" arrow />
+  <Cards.Card title="Secrets" href="/reference/secrets" arrow />
 </Cards>

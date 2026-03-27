@@ -88,10 +88,6 @@ If you've verified the key is set and are still seeing errors, double-check that
 export IRONS_API_URL=https://your-custom-endpoint.example.com
 ```
 
-## Errors Connecting to Naked IP Addresses
-
-Iron.sh egress rules are domain-based and do not support allowlisting raw IP addresses. URLs like `https://10.20.30.40` will be blocked even in `warn` mode. If you need to reach a service that only exposes an IP address, create a DNS record for it so it can be referenced by hostname, then allowlist that hostname with `irons egress allow`.
-
 ## Still Having Issues?
 
 If you're still running into problems, reach out to us at [support@iron.sh](mailto:support@iron.sh) and we'll help you get unblocked.
