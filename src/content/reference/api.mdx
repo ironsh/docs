@@ -5,7 +5,7 @@ description: "Complete reference for the Iron.sh REST API."
 
 # API Reference
 
-The Iron.sh REST API lets you manage sandboxes, egress rules, and audit logs programmatically.
+The Iron.sh REST API lets you manage sandboxes, agents, environment variables, egress rules, and audit logs programmatically.
 
 **Base URL:** `https://api.iron.sh`
 
@@ -32,6 +32,10 @@ All resources use prefixed, opaque IDs:
 | Egress Event | `ee_`   | `ee_w8n3vqx1`    |
 | Secret       | `sec_`  | `sec_m4xk9wp2`   |
 | Snapshot     | `snap_` | `snap_abc123`    |
+| Agent        | `agt_`  | `agt_x9k2mf4p`   |
+| Env Variable | `env_`  | `env_m4xk9wp2`   |
+| User         | `usr_`  | `usr_w3n8vqx1`    |
+| API Key      | `key_`  | `key_p4t7xm2k`   |
 
 ### Pagination
 
@@ -858,6 +862,365 @@ curl -X DELETE https://api.iron.sh/v1/snapshots/snap_abc123 \
 | Code                 | Status | Description                                        |
 | -------------------- | ------ | -------------------------------------------------- |
 | `snapshot_not_found` | `404`  | Snapshot does not exist or does not belong to you.  |
+
+---
+
+## Signup
+
+### Create a User
+
+```
+POST /v1/users
+```
+
+Creates a new user account and returns an API key. This endpoint does not require authentication.
+
+**Request body:**
+
+| Field        | Type   | Required | Description                  |
+| ------------ | ------ | -------- | ---------------------------- |
+| `first_name` | string | yes      | User's first name.           |
+| `last_name`  | string | yes      | User's last name.            |
+| `email`      | string | yes      | Email address. Must be unique. |
+| `password`   | string | yes      | Account password.            |
+
+```sh
+curl -X POST https://api.iron.sh/v1/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Alice",
+    "last_name": "Smith",
+    "email": "alice@example.com",
+    "password": "s3cureP@ssword"
+  }'
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "api_key": {
+    "id": "key_p4t7xm2k",
+    "name": "CLI",
+    "token": "iron_live_a1b2c3d4e5f6...",
+    "created_at": "2026-03-15T12:00:00Z"
+  },
+  "user": {
+    "id": "usr_w3n8vqx1",
+    "first_name": "Alice",
+    "last_name": "Smith",
+    "email": "alice@example.com",
+    "email_verified": false,
+    "created_at": "2026-03-15T12:00:00Z"
+  }
+}
+```
+
+A verification email is sent automatically. The returned `token` can be used immediately as a Bearer token to authenticate subsequent API requests.
+
+**Errors:**
+
+| Code               | Status | Description                                    |
+| ------------------ | ------ | ---------------------------------------------- |
+| `email_taken`      | `409`  | An account with this email already exists.     |
+| `validation_error` | `422`  | One or more fields failed validation.          |
+
+---
+
+## Environment Variables
+
+Environment variables let you store key-value configuration that is available inside your sandboxes.
+
+### List Environment Variables
+
+```
+GET /v1/env
+```
+
+**Query parameters:**
+
+| Param    | Type    | Default | Description                              |
+| -------- | ------- | ------- | ---------------------------------------- |
+| `cursor` | string  | —       | Pagination cursor from previous response |
+| `limit`  | integer | `50`    | Results per page. Max 200.               |
+
+```sh
+curl https://api.iron.sh/v1/env \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": "env_m4xk9wp2",
+      "key": "NODE_ENV",
+      "value": "production",
+      "created_at": "2026-03-15T12:00:00Z",
+      "updated_at": "2026-03-15T12:00:00Z"
+    }
+  ],
+  "has_more": false,
+  "cursor": null
+}
+```
+
+---
+
+### Get an Environment Variable
+
+```
+GET /v1/env/{key}
+```
+
+```sh
+curl https://api.iron.sh/v1/env/NODE_ENV \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "env_m4xk9wp2",
+  "key": "NODE_ENV",
+  "value": "production",
+  "created_at": "2026-03-15T12:00:00Z",
+  "updated_at": "2026-03-15T12:00:00Z"
+}
+```
+
+**Errors:**
+
+| Code            | Status | Description                       |
+| --------------- | ------ | --------------------------------- |
+| `env_not_found` | `404`  | Environment variable not found.   |
+
+---
+
+### Set an Environment Variable
+
+```
+PUT /v1/env/{key}
+```
+
+Creates or updates an environment variable. If a variable with the given key already exists, its value is replaced.
+
+**Request body:**
+
+| Field   | Type   | Required | Description                     |
+| ------- | ------ | -------- | ------------------------------- |
+| `value` | string | yes      | The value for the variable.     |
+
+```sh
+curl -X PUT https://api.iron.sh/v1/env/NODE_ENV \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"value": "production"}'
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "env_m4xk9wp2",
+  "key": "NODE_ENV",
+  "value": "production",
+  "created_at": "2026-03-15T12:00:00Z",
+  "updated_at": "2026-03-15T12:00:00Z"
+}
+```
+
+**Errors:**
+
+| Code               | Status | Description                           |
+| ------------------ | ------ | ------------------------------------- |
+| `validation_error` | `422`  | One or more fields failed validation. |
+
+---
+
+### Delete an Environment Variable
+
+```
+DELETE /v1/env/{key}
+```
+
+```sh
+curl -X DELETE https://api.iron.sh/v1/env/NODE_ENV \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Code            | Status | Description                       |
+| --------------- | ------ | --------------------------------- |
+| `env_not_found` | `404`  | Environment variable not found.   |
+
+---
+
+## Agents
+
+Agents are long-running AI coding agents backed by a dedicated VM. Each agent clones a repository and executes a prompt using the specified harness (e.g. `claude`).
+
+### Agent Status
+
+| `status`       | Description                                             |
+| -------------- | ------------------------------------------------------- |
+| `provisioning` | The agent's VM is being created and configured.         |
+| `running`      | The agent is actively executing its prompt.             |
+| `idle`         | The agent has finished its work and is waiting.         |
+
+### Create an Agent
+
+```
+POST /v1/agents
+```
+
+**Request body:**
+
+| Field        | Type   | Required | Description                                                                                                     |
+| ------------ | ------ | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `name`       | string | yes      | Unique name for the agent. Must be unique among active agents.                                                  |
+| `repo`       | string | yes      | Git repository URL to clone (e.g. `https://github.com/org/repo`).                                               |
+| `branch`     | string | no       | Branch to check out. Defaults to the repository's default branch.                                               |
+| `harness`    | string | no       | Agent harness to use. Default: `claude`.                                                                         |
+| `prompt`     | string | yes      | The prompt or task description for the agent to execute.                                                         |
+| `agent_args` | string | no       | Additional arguments to pass to the agent harness.                                                               |
+
+```sh
+curl -X POST https://api.iron.sh/v1/agents \
+  -H "Authorization: Bearer $IRONS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "fix-auth-bug",
+    "repo": "https://github.com/org/repo",
+    "branch": "main",
+    "prompt": "Fix the authentication bug in src/auth.ts"
+  }'
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "id": "agt_x9k2mf4p",
+  "name": "fix-auth-bug",
+  "repo": "https://github.com/org/repo",
+  "branch": "main",
+  "harness": "claude",
+  "prompt": "Fix the authentication bug in src/auth.ts",
+  "agent_args": null,
+  "status": "provisioning",
+  "vm_id": "vm_k3mf9xvw2p",
+  "created_at": "2026-03-15T12:00:00Z",
+  "updated_at": "2026-03-15T12:00:00Z"
+}
+```
+
+**Errors:**
+
+| Code               | Status | Description                                       |
+| ------------------ | ------ | ------------------------------------------------- |
+| `agent_name_taken` | `409`  | An active agent with this name already exists.    |
+| `validation_error` | `422`  | One or more fields failed validation.             |
+
+---
+
+### List Agents
+
+```
+GET /v1/agents
+```
+
+Returns active agents (not destroyed).
+
+**Query parameters:**
+
+| Param    | Type    | Default | Description                                                   |
+| -------- | ------- | ------- | ------------------------------------------------------------- |
+| `status` | string  | —       | Filter by status: `provisioning`, `running`, `idle`           |
+| `name`   | string  | —       | Filter by exact name match                                    |
+| `cursor` | string  | —       | Pagination cursor from previous response                      |
+| `limit`  | integer | `20`    | Results per page. Max 100.                                    |
+
+```sh
+curl https://api.iron.sh/v1/agents?status=running \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": "agt_x9k2mf4p",
+      "name": "fix-auth-bug",
+      "repo": "https://github.com/org/repo",
+      "branch": "main",
+      "harness": "claude",
+      "prompt": "Fix the authentication bug in src/auth.ts",
+      "agent_args": null,
+      "status": "running",
+      "vm_id": "vm_k3mf9xvw2p",
+      "created_at": "2026-03-15T12:00:00Z",
+      "updated_at": "2026-03-15T12:01:00Z"
+    }
+  ],
+  "has_more": false,
+  "cursor": null
+}
+```
+
+---
+
+### Get an Agent
+
+```
+GET /v1/agents/{agent_id}
+```
+
+```sh
+curl https://api.iron.sh/v1/agents/agt_x9k2mf4p \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `200 OK`
+
+Same shape as the create response.
+
+**Errors:**
+
+| Code              | Status | Description                                       |
+| ----------------- | ------ | ------------------------------------------------- |
+| `agent_not_found` | `404`  | Agent not found or has been destroyed.            |
+
+---
+
+### Destroy an Agent
+
+```
+DELETE /v1/agents/{agent_id}
+```
+
+Destroys the agent and its backing VM.
+
+```sh
+curl -X DELETE https://api.iron.sh/v1/agents/agt_x9k2mf4p \
+  -H "Authorization: Bearer $IRONS_API_KEY"
+```
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Code              | Status | Description                                       |
+| ----------------- | ------ | ------------------------------------------------- |
+| `agent_not_found` | `404`  | Agent not found or has been destroyed.            |
 
 ---
 
