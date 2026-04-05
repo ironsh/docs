@@ -1,0 +1,228 @@
+---
+title: "Quickstart"
+description: "Get iron-proxy running and intercept your first request in under 60 seconds."
+---
+
+import { Steps } from "nextra/components";
+
+# Quickstart
+
+This guide uses the [docker-compose example](https://github.com/ironsh/iron-proxy/tree/main/examples/docker-compose) from the iron-proxy repo. By the end you'll have a running proxy that allowlists specific hosts, blocks everything else, and swaps proxy tokens for real secrets.
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Git
+
+<Steps>
+
+### Clone the Repo
+
+```sh
+git clone https://github.com/ironsh/iron-proxy.git
+cd iron-proxy/examples/docker-compose
+```
+
+### Start the Proxy and Demo Client
+
+```sh
+docker compose up
+```
+
+This starts two containers on a shared bridge network:
+
+- **proxy**: builds iron-proxy from source, generates a CA certificate on startup, and listens on `172.20.0.2`
+- **client**: an Alpine container that uses the proxy's DNS and runs a series of demo requests
+
+### Watch the Output
+
+The client runs five requests that demonstrate core functionality:
+
+**1. Allowed request.** `httpbin.org` is in the allowlist, so the request succeeds:
+```
+> curl https://httpbin.org/get
+```
+
+**2. Blocked request.** `example.com` is not in the allowlist:
+```
+> curl https://example.com/
+# Returns 403 Forbidden
+```
+
+**3. Secret swap in Authorization header.** The client sends a proxy token, and iron-proxy replaces it with the real key before forwarding:
+```
+> curl -H "Authorization: Bearer proxy-openai-abc123" https://httpbin.org/headers
+# httpbin echoes back the real OPENAI_API_KEY value
+```
+
+**4. Secret swap in custom header.** `INTERNAL_TOKEN` is configured to match all headers:
+```
+> curl -H "X-Internal: proxy-internal-tok" https://httpbin.org/headers
+```
+
+**5. Secret swap in query parameter.** Query parameters are always scanned:
+```
+> curl "https://httpbin.org/get?token=proxy-openai-abc123&q=hello"
+```
+
+### Check the Audit Logs
+
+View the proxy's structured JSON logs:
+
+```sh
+docker compose logs proxy
+```
+
+Each request produces a log entry like:
+
+```json
+{
+  "host": "httpbin.org",
+  "method": "GET",
+  "path": "/headers",
+  "action": "allow",
+  "status_code": 200,
+  "duration_ms": 142,
+  "request_transforms": [
+    {
+      "name": "allowlist",
+      "action": "continue"
+    },
+    {
+      "name": "secrets",
+      "action": "continue",
+      "annotations": {
+        "swapped": [
+          {
+            "secret": "OPENAI_API_KEY",
+            "locations": ["header:Authorization"]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Blocked requests include a `rejected_by` field and log at WARN level.
+
+</Steps>
+
+## What Just Happened
+
+### Docker Setup
+
+The Compose file creates a bridge network (`172.20.0.0/24`) with two services and a shared volume for the CA certificate:
+
+```yaml
+services:
+  proxy:
+    build:
+      context: ../..
+      dockerfile: examples/docker-compose/Dockerfile
+    environment:
+      - OPENAI_API_KEY=sk-real-openai-key-do-not-share
+      - INTERNAL_TOKEN=real-internal-secret-value
+    volumes:
+      - certs:/certs
+    networks:
+      demo:
+        ipv4_address: 172.20.0.2
+
+  client:
+    image: alpine:latest
+    depends_on:
+      - proxy
+    dns:
+      - 172.20.0.2
+    volumes:
+      - ./client.sh:/demo/client.sh:ro
+      - certs:/certs:ro
+    entrypoint: ["/bin/sh", "/demo/client.sh"]
+    networks:
+      demo:
+        ipv4_address: 172.20.0.4
+
+volumes:
+  certs:
+
+networks:
+  demo:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+```
+
+The key wiring:
+
+- **`dns: [172.20.0.2]`** on the client points all DNS lookups at the proxy. The proxy's DNS server returns its own IP for every lookup, so all HTTP/HTTPS traffic routes through it.
+- **`environment`** on the proxy holds real secrets. The client never has access to these values.
+- **`certs` volume** is shared between both services. The proxy generates a CA cert on startup and writes it here. The client reads it so it can trust the proxy's TLS certificates.
+
+### Proxy Config
+
+The proxy is configured via [`proxy.yaml`](https://github.com/ironsh/iron-proxy/blob/main/examples/docker-compose/proxy.yaml):
+
+```yaml
+# Built-in DNS server. Returns proxy_ip for all lookups so
+# all outbound traffic routes through the proxy.
+dns:
+  listen: ":53"
+  proxy_ip: "172.20.0.2"
+
+proxy:
+  http_listen: ":80"
+  https_listen: ":443"
+
+# CA cert used to mint leaf certificates on the fly for TLS
+# interception. The client trusts this CA via the shared volume.
+tls:
+  ca_cert: "/certs/ca.crt"
+  ca_key: "/certs/ca.key"
+
+# Transforms run in order on every request.
+transforms:
+  # Only requests to these domains are allowed.
+  # Everything else gets a 403.
+  - name: allowlist
+    config:
+      domains:
+        - "httpbin.org"
+
+  # Read real secret values from the proxy container's environment.
+  # Each secret maps a proxy token to an env var. When the proxy
+  # sees a token in a request, it swaps in the real value before
+  # forwarding upstream.
+  - name: secrets
+    config:
+      source: env # read secrets from environment variables
+      secrets:
+        - var: OPENAI_API_KEY           # env var on the proxy container
+          proxy_value: "proxy-openai-abc123" # token the client sends
+          match_headers: ["Authorization"]   # only scan this header
+          match_body: false
+          hosts:
+            - name: "httpbin.org"
+
+        - var: INTERNAL_TOKEN
+          proxy_value: "proxy-internal-tok"
+          match_headers: []  # empty list = scan all headers
+          match_body: false
+          hosts:
+            - name: "httpbin.org"
+
+log:
+  level: "info"
+```
+
+## Next Steps
+
+import { Cards } from "nextra/components";
+
+<Cards>
+  <Cards.Card title="Configuration Reference" href="/reference/configuration" arrow />
+  <Cards.Card title="Docker Deployment" href="/guides/docker" arrow />
+  <Cards.Card title="Routing Traffic to the Proxy" href="/guides/routing" arrow />
+  <Cards.Card title="Architecture" href="/reference/architecture" arrow />
+</Cards>

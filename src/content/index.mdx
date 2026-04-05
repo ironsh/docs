@@ -1,80 +1,52 @@
 ---
-title: "Overview & Quickstart"
-description: "Learn what Iron.sh is, how it works, and how to get started."
+title: "Overview"
+description: "What iron-proxy is, who it's for, and how it fits into your stack."
 ---
-
-import { Steps } from "nextra/components";
 
 # Overview
 
-Iron.sh gives AI coding agents hardened dev environments: real machines with controlled network access, transparent secrets proxying, full egress audit logs, and instant snapshot/rollback.
+CI jobs, AI coding agents, and sandboxed containers already have network access and real credentials. A compromised dependency, a prompt injection, or a malicious build step can exfiltrate secrets, phone home, or open a reverse shell. Today, most setups give you zero visibility into whether that's happening.
 
-AI coding agents install packages, run builds, and call APIs. That means real network access, real credentials, and real exposure to prompt injection, data exfiltration, and unauthorized outbound calls. Iron.sh is the infrastructure layer that makes this safe by default.
+**iron-proxy** is the boundary that stops it. It's a single-binary egress firewall that intercepts all outbound traffic from untrusted workloads, checks every request against policy, and injects secrets at the network edge so workloads never see real credentials. Every request is logged with full detail on what was allowed, blocked, and transformed.
 
-## Features
+## How It Works
 
-**Secrets proxying.** Agents never see real credentials. You store secrets in Iron.sh and they're injected at the network layer when the agent makes an outbound request. Inside the environment, the agent only sees a proxy token. It can't log, leak, or exfiltrate the real key.
+iron-proxy sits between your containers and the internet. All outbound traffic is intercepted, checked against your policy, and either transformed and forwarded or blocked. Nothing leaves unless explicitly allowed.
 
-**Default-deny egress.** Every outbound connection is policy-controlled. You allowlist the domains an agent needs (package registries, APIs, git hosts) and everything else is blocked. Rules can also be set to `warn` mode to audit traffic before locking things down.
-
-**Snapshot, rollback, and fork.** Checkpoint your environment before a risky run. If the agent breaks something, restore in seconds. Fork a snapshot to try a different approach in parallel.
-
-**Full audit logging.** Every outbound connection is logged with host, path, method, response code, bytes transferred, and which secrets were injected. You know exactly what your agent did.
-
-**Persistent, long-running environments.** No 24-hour walls. Environments persist for hours, days, or weeks. Installed packages, config, and working state survive restarts. Your agent picks up where it left off.
-
-## Quickstart
-
-Before you begin, make sure you're running macOS or Linux. Windows is not currently supported.
-
-<Steps>
-
-### Step 1: Install the CLI
-
-The quickest way to install `irons` is via the install script. It downloads the latest release, validates its SHA-256 checksum, and places the binary on your `$PATH`:
-
-```sh
-curl -fsSL https://install.iron.sh | bash
+```
+Container → iron-proxy → policy check → transform pipeline → upstream (or reject)
 ```
 
-### Step 2: Onboard
+For details on DNS interception, TLS termination, certificate minting, and the transform pipeline internals, see [Architecture](/reference/architecture).
 
-Next, onboard with a single command:
+## Key Capabilities
 
-```sh
-irons onboard
-```
+**Default-deny egress.** Nothing leaves unless you allow it. Allowlists support domain globs (`*.anthropic.com`) and CIDRs (`10.0.0.0/8`), with an optional `warn` mode for auditing before enforcement.
 
-This command will create an iron.sh account and API key for you, create GitHub and coding harness secrets, and provision a new [agent](./getting-started/coding-agents.mdx) for you to use.
+**Secret injection at the boundary.** Workloads never see real credentials. They only hold proxy tokens. iron-proxy swaps in real values at the network edge before forwarding. If a workload is compromised, there are no real secrets to exfiltrate.
 
-![Image of irons onboard](/images/tui-onboard.png)
+**Full audit trail.** Every request is logged as structured JSON with host, method, path, status, and duration. Logs include per-transform annotations: which secrets were injected, where, and which policy allowed or rejected the request.
 
-### Step 3: Use your Agent
+**Streaming-aware.** WebSocket upgrades and Server-Sent Events are proxied natively.
 
-You're now ready to use your agent! Your GitHub repo is automatically cloned, so you can get started right away. The previous command will drop you into a TUI for interacting with your agent, and managing egress rules. If it didn't, run `irons agents attach <agent-name>`.
+## Who It's For
 
-![Image of default TUI screen](/images/tui-default.png)
+If you run untrusted code that has network access and credentials, you need iron-proxy. That includes CI pipelines with third-party build steps, AI coding agents calling APIs, container platforms executing user-submitted code, or any workload where a compromise could mean silent data exfiltration.
 
-To monitor your agent's egress attempts and allow/deny them in real time, press `Ctrl-]` to flip over to the egress monitoring pane:
+## Open Source and Iron Platform
 
-![Image of default TUI screen](/images/tui-egress.png)
+iron-proxy is [open source](https://github.com/ironsh/iron-proxy) and fully functional standalone. Run it anywhere: Docker, Kubernetes, bare metal, CI runners.
 
-### Step 4: Tear Down the Agent
+When you're operating more than a handful of proxy instances, managing policies, secrets, and audit logs per-instance stops scaling. The **Iron Platform** is an optional control plane that centralizes policy enforcement, secrets management, and audit aggregation across your fleet. See [Iron Platform Overview](/platform) for details.
 
-When you're done, destroy the agent and clean up all associated resources:
+## Comparison With Alternatives
 
-```sh
-irons agents destroy <agent-name>
-```
+iron-proxy is purpose-built for controlling and observing untrusted workloads. General-purpose proxies can be configured toward similar goals, but they weren't designed for this problem and lack built-in primitives for it.
 
-</Steps>
-
-## Next Steps
-
-import { Cards } from "nextra/components";
-
-<Cards>
-  <Cards.Card title="CLI Reference" href="/reference/cli" arrow />
-  <Cards.Card title="Egress Rules" href="/reference/egress" arrow />
-  <Cards.Card title="Secrets" href="/reference/secrets" arrow />
-</Cards>
+| | iron-proxy | Squid | mitmproxy | Envoy |
+|---|---|---|---|---|
+| **Primary use case** | Egress control for untrusted workloads | Web caching / access control | Traffic inspection / debugging | Service mesh / L7 routing |
+| **Default-deny egress** | Built-in | Requires complex ACL config | Requires custom scripting | Requires RBAC/filter config |
+| **Secret injection** | Built-in | — | — | — |
+| **Audit logging** | Structured JSON with per-transform traces | Basic access logs | Plugin-based | Configurable access logs |
+| **Setup** | Single binary + YAML | Extensive config language | Python scripting | Complex YAML or control plane |
