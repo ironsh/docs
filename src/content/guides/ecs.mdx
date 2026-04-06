@@ -1,0 +1,447 @@
+---
+title: Amazon ECS Integration
+description: "Lock down egress traffic on ECS clusters using iron-proxy as a daemon service."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Amazon ECS Integration
+
+This guide walks through running iron-proxy as a [daemon service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html#service_scheduler_daemon) on Amazon ECS. iron-proxy intercepts all outbound HTTP/HTTPS traffic from workload containers and checks it against a domain allowlist.
+
+<Callout type="warning">
+Fargate is not supported. Fargate doesn't allow per-container DNS overrides, which iron-proxy requires to intercept traffic. This guide requires ECS with the EC2 launch type.
+</Callout>
+
+## How It Works
+
+iron-proxy sits on the Docker bridge network. Workload containers point their DNS at iron-proxy, which intercepts lookups, returns its own IP, and terminates TLS using a per-domain leaf certificate minted from an ephemeral CA. Traffic is then checked against your allowlist and forwarded upstream.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ EC2 Instance                                             │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ docker0 bridge                                     │  │
+│  │                                                    │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │  │
+│  │  │workload-A│  │workload-B│  │  iron-proxy      │  │  │
+│  │  │          │  │          │  │  (daemon)        │  │  │
+│  │  │ dns: ────┼──┼──────────┼─►│  :53  DNS        │  │  │
+│  │  │  proxy IP│  │ dns: ────┼─►│  :443 HTTPS      │  │  │
+│  │  │          │  │  proxy IP│  │  :80  HTTP       │  │  │
+│  │  └──────────┘  └──────────┘  └────────┬─────────┘  │  │
+│  └───────────────────────────────────────┼────────────┘  │
+│                                          │               │
+│                                   allowed traffic       │
+│                                          ▼               │
+│                                     internet / VPC       │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Prerequisites
+
+- An ECS cluster with at least one EC2 instance registered
+- The `aws` CLI configured with credentials
+- An S3 bucket for the iron-proxy config file
+- A CloudWatch log group (e.g. `/ecs/iron-proxy`)
+
+## Setup
+
+<Steps>
+
+### Create the iron-proxy Config
+
+Create an `iron-proxy.yaml` file. This controls DNS behavior, the allowlist, and audit logging.
+
+```yaml
+dns:
+  listen: ":53"
+  proxy_ip: "172.17.0.2"
+  upstream_resolver: "10.0.0.2:53"
+proxy:
+  http_listen: ":80"
+  https_listen: ":443"
+
+tls:
+  ca_cert: "/etc/iron-proxy/ca.crt"
+  ca_key: "/etc/iron-proxy/ca.key"
+
+transforms:
+  - name: allowlist
+    config:
+      warn: true
+      domains:
+        - "registry.npmjs.org"
+        - "pypi.org"
+        - "files.pythonhosted.org"
+```
+
+A few things to note:
+
+- **`dns.upstream_resolver`** must be your VPC DNS resolver. This is always the `.2` address of your VPC CIDR (e.g. `10.0.0.2` for a `10.0.0.0/16` VPC). Port is required.
+- **`dns.proxy_ip`** must match the IP iron-proxy gets on the Docker bridge. Docker assigns bridge IPs sequentially, and the daemon service (which starts first) will typically get `172.17.0.2`.
+- **`warn: true`** means all traffic is logged but nothing is blocked. Set to `false` (or remove it) when your allowlist is complete.
+
+Upload the config to S3:
+
+```bash
+aws s3 cp iron-proxy.yaml s3://YOUR_BUCKET/iron-proxy.yaml
+```
+
+### Create the Daemon Task Definition
+
+The daemon task has two containers:
+
+1. **iron-proxy-init** generates an ephemeral CA certificate on first boot and writes it to a shared host volume. Skips generation on subsequent restarts.
+2. **iron-proxy** waits for the init container to finish, then starts the proxy.
+
+Save this as `iron-proxy-daemon.json`:
+
+```json
+{
+  "family": "iron-proxy-daemon",
+  "networkMode": "bridge",
+  "requiresCompatibilities": ["EC2"],
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ironProxyTaskRole",
+  "volumes": [
+    {
+      "name": "iron-ca",
+      "host": { "sourcePath": "/opt/iron-proxy/ca" }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "iron-proxy-init",
+      "image": "alpine:latest",
+      "essential": false,
+      "memory": 64,
+      "command": [
+        "sh", "-c",
+        "if [ -f /etc/iron-proxy/ca.crt ] && [ -f /etc/iron-proxy/ca.key ]; then echo 'CA exists'; exit 0; fi && apk add --no-cache openssl && openssl genrsa -out /etc/iron-proxy/ca.key 4096 && openssl req -x509 -new -nodes -key /etc/iron-proxy/ca.key -sha256 -days 90 -subj '/CN=iron-proxy CA' -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign' -out /etc/iron-proxy/ca.crt"
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "iron-ca",
+          "containerPath": "/etc/iron-proxy"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/iron-proxy",
+          "awslogs-region": "YOUR_REGION",
+          "awslogs-stream-prefix": "init"
+        }
+      }
+    },
+    {
+      "name": "iron-proxy",
+      "image": "docker.io/ironsh/iron-proxy:latest",
+      "essential": true,
+      "memory": 256,
+      "dependsOn": [
+        {
+          "containerName": "iron-proxy-init",
+          "condition": "SUCCESS"
+        }
+      ],
+      "command": [
+        "-config", "s3://YOUR_BUCKET/iron-proxy.yaml"
+      ],
+      "environment": [
+        { "name": "AWS_REGION", "value": "YOUR_REGION" }
+      ],
+      "portMappings": [
+        { "containerPort": 53, "hostPort": 53, "protocol": "udp" },
+        { "containerPort": 53, "hostPort": 53, "protocol": "tcp" },
+        { "containerPort": 443, "hostPort": 443, "protocol": "tcp" },
+        { "containerPort": 80, "hostPort": 80, "protocol": "tcp" }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "iron-ca",
+          "containerPath": "/etc/iron-proxy"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/iron-proxy",
+          "awslogs-region": "YOUR_REGION",
+          "awslogs-stream-prefix": "daemon"
+        }
+      }
+    }
+  ]
+}
+```
+
+The **task execution role** (`ecsTaskExecutionRole`) needs the standard ECS permissions to pull images and write logs. Attach the managed `AmazonECSTaskExecutionRolePolicy`.
+
+The **task role** (`ironProxyTaskRole`) needs S3 read access so iron-proxy can fetch its config at startup:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::YOUR_BUCKET/*"
+    }
+  ]
+}
+```
+
+Both roles must have an `ecs-tasks.amazonaws.com` trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ecs-tasks.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+### Deploy the Daemon Service
+
+Register the task definition and create a daemon service:
+
+```bash
+aws ecs register-task-definition \
+  --cli-input-json file://iron-proxy-daemon.json
+
+aws ecs create-service \
+  --cluster YOUR_CLUSTER \
+  --service-name iron-proxy \
+  --task-definition iron-proxy-daemon \
+  --scheduling-strategy DAEMON \
+  --deployment-configuration \
+    'maximumPercent=100,minimumHealthyPercent=0'
+```
+
+ECS will place one iron-proxy task on every EC2 instance in the cluster. When new instances join, they get one too.
+
+### Configure Workload Task Definitions
+
+Two changes to any workload task definition:
+
+1. Set `dnsServers` to iron-proxy's bridge IP so DNS resolves through the proxy
+2. Mount the CA certificate volume so the workload trusts iron-proxy's TLS certificates
+
+Here's a minimal test workload that curls `httpbin.org` through iron-proxy every 5 seconds:
+
+```json
+{
+  "family": "iron-proxy-test",
+  "networkMode": "bridge",
+  "requiresCompatibilities": ["EC2"],
+  "containerDefinitions": [
+    {
+      "name": "curl-test",
+      "image": "alpine/curl:latest",
+      "essential": true,
+      "memory": 128,
+      "dnsServers": ["172.17.0.2"],
+      "entryPoint": ["sh", "-c"],
+      "command": [
+        "while true; do curl -sv --cacert /etc/iron-proxy/ca.crt https://httpbin.org/get 2>&1; sleep 5; done"
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "iron-ca",
+          "containerPath": "/etc/iron-proxy",
+          "readOnly": true
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/iron-proxy",
+          "awslogs-region": "YOUR_REGION",
+          "awslogs-stream-prefix": "curl-test"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "iron-ca",
+      "host": { "sourcePath": "/opt/iron-proxy/ca" }
+    }
+  ]
+}
+```
+
+Run the test:
+
+```bash
+aws ecs register-task-definition \
+  --cli-input-json file://iron-proxy-test.json
+
+aws ecs run-task \
+  --cluster YOUR_CLUSTER \
+  --task-definition iron-proxy-test
+```
+
+### Verify
+
+Watch iron-proxy's audit logs:
+
+```bash
+aws logs tail /ecs/iron-proxy --prefix daemon --follow
+```
+
+You should see a JSON audit entry for every request:
+
+```json
+{
+  "host": "httpbin.org",
+  "method": "GET",
+  "path": "/get",
+  "action": "allow",
+  "status_code": 200,
+  "duration_ms": 142,
+  "request_transforms": [
+    { "name": "allowlist", "action": "allow" }
+  ]
+}
+```
+
+</Steps>
+
+## Rolling Out
+
+Start in warn mode, then switch to enforce mode once your allowlist is dialed in.
+
+1. **Start with warn mode.** Set `warn: true` in the allowlist config as shown above. All traffic flows through, and denied requests are logged but not blocked.
+2. **Review the audit logs.** They show every domain your workloads contact and whether requests would have been allowed or denied.
+3. **Build your allowlist.** Add domains you expect and trust to `iron-proxy.yaml`.
+4. **Switch to enforce mode.** Remove `warn: true` (or set it to `false`). Non-allowlisted requests are now blocked.
+
+## Preventing Circumvention
+
+<Callout type="warning">
+This section is strongly recommended to prevent workloads from bypassing your egress rules.
+</Callout>
+
+This isn't required to run the demo above. Setting `dnsServers` routes DNS through iron-proxy, but a workload container could still bypass the proxy by connecting to an IP address directly. To prevent this, add `iptables` rules to the EC2 instance that force all outbound traffic from containers through iron-proxy.
+
+You'll need to add `iptables` rules similar to the following to your instance user data:
+
+```bash
+# Get the iron-proxy container IP
+PROXY_IP=172.17.0.2
+
+# Allow traffic from iron-proxy itself to reach the internet
+iptables -I FORWARD -s $PROXY_IP -j ACCEPT
+
+# Allow established connections (return traffic)
+iptables -I FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Block all other outbound traffic from the Docker bridge
+# except to iron-proxy's ports
+iptables -A FORWARD -i docker0 -p tcp --dport 80 -d $PROXY_IP -j ACCEPT
+iptables -A FORWARD -i docker0 -p tcp --dport 443 -d $PROXY_IP -j ACCEPT
+iptables -A FORWARD -i docker0 -p udp --dport 53 -d $PROXY_IP -j ACCEPT
+iptables -A FORWARD -i docker0 -p tcp --dport 53 -d $PROXY_IP -j ACCEPT
+iptables -A FORWARD -i docker0 -j DROP
+```
+
+This ensures that workload containers can only reach the network through iron-proxy. Direct connections to external IPs are dropped at the host level.
+
+## Updating the Config
+
+Edit `iron-proxy.yaml`, re-upload to S3, and force a redeployment:
+
+```bash
+aws s3 cp iron-proxy.yaml s3://YOUR_BUCKET/iron-proxy.yaml
+
+aws ecs update-service \
+  --cluster YOUR_CLUSTER \
+  --service iron-proxy \
+  --force-new-deployment
+```
+
+iron-proxy fetches the config from S3 at startup, so a redeployment picks up the new config.
+
+## CA Certificate Rotation
+
+The init container generates a 90-day CA on first boot and persists it to the host at `/opt/iron-proxy/ca`. To rotate, delete the files from the host and restart the daemon service:
+
+```bash
+# On the EC2 instance:
+sudo rm /opt/iron-proxy/ca/ca.crt /opt/iron-proxy/ca/ca.key
+
+# Then force a redeployment:
+aws ecs update-service \
+  --cluster YOUR_CLUSTER \
+  --service iron-proxy \
+  --force-new-deployment
+```
+
+Workload containers pick up the new CA from the shared volume on their next restart.
+
+## Trusting the CA
+
+Workload containers need to trust iron-proxy's CA certificate. Mount the CA volume and configure your runtime:
+
+| Runtime | Environment Variable or Flag |
+| --- | --- |
+| curl | `--cacert /etc/iron-proxy/ca.crt` |
+| Most languages | `SSL_CERT_FILE=/etc/iron-proxy/ca.crt` |
+| Node.js | `NODE_EXTRA_CA_CERTS=/etc/iron-proxy/ca.crt` |
+| Python (requests) | `REQUESTS_CA_BUNDLE=/etc/iron-proxy/ca.crt` |
+
+Alternatively, you can bake the CA certificate directly into your workload Dockerfile. In that case, you'll need to pre-generate the CA rather than using the init container.
+
+For more details, see the [CA certificate reference](/reference/ca-certificate).
+
+## Secrets
+
+If your iron-proxy config includes secrets (e.g. API keys for upstream services), you can inject them as environment variables using [AWS Secrets Manager](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data-secrets.html). Add a `secrets` block to the iron-proxy container definition:
+
+```json
+"secrets": [
+  {
+    "name": "SOME_API_KEY",
+    "valueFrom": "arn:aws:secretsmanager:YOUR_REGION:YOUR_ACCOUNT_ID:secret:iron-proxy/api-key"
+  }
+]
+```
+
+ECS pulls the secret value at task launch and exposes it as an environment variable in the container. Don't forget to add a corresponding `secrets` entry in your `iron-proxy.yaml` so the proxy knows to read it. See the [configuration reference](/reference/configuration#secrets) for details.
+
+## Troubleshooting
+
+### iron-proxy container exits immediately
+
+Check that `AWS_REGION` is set in the container environment. Without it, the S3 config fetch fails silently.
+
+### Workloads get "connection refused"
+
+Verify `dns.proxy_ip` in the config matches iron-proxy's actual IP on the Docker bridge:
+
+```bash
+sudo docker inspect $(sudo docker ps -q --filter name=iron-proxy) \
+  --format '{{.NetworkSettings.Networks.bridge.IPAddress}}'
+```
+
+### Upstream TLS errors (x509)
+
+iron-proxy verifies upstream server certificates against its system CA bundle. If the upstream chain includes a root not in Alpine's trust store, you'll see `certificate signed by unknown authority`. Fix by adding the missing root CA to the iron-proxy image.
+
+### Port 53 conflict
+
+If `systemd-resolved` is running on the EC2 host, it binds port 53 and iron-proxy can't start. Disable it in your instance user data:
+
+```bash
+systemctl disable --now systemd-resolved
+```
