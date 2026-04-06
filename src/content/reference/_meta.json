@@ -1,3 +1,4 @@
 {
-  "configuration": "Configuration"
+  "configuration": "Configuration",
+  "ca-certificate": "CA Certificate"
 }
