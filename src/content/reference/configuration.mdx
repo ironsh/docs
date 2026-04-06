@@ -1,0 +1,227 @@
+---
+title: "Configuration"
+description: "Complete reference for iron-proxy's YAML configuration file."
+---
+
+# Configuration
+
+iron-proxy is configured via a single YAML file, passed at startup with the `-config` flag:
+
+```sh
+iron-proxy -config /etc/iron-proxy/proxy.yaml
+```
+
+Below is a complete reference for every configuration option.
+
+## Full Example
+
+```yaml
+dns:
+  listen: ":53"
+  proxy_ip: "172.20.0.2"
+  upstream_resolver: "8.8.8.8:53"
+  passthrough:
+    - "*.internal.corp"
+  records:
+    - name: "custom.local"
+      type: A
+      value: "10.0.0.5"
+
+proxy:
+  http_listen: ":80"
+  https_listen: ":443"
+  max_request_body_bytes: 1048576
+  max_response_body_bytes: 0
+
+tls:
+  ca_cert: "/certs/ca.crt"
+  ca_key: "/certs/ca.key"
+  cert_cache_size: 1000
+  leaf_cert_expiry_hours: 72
+
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "registry.npmjs.org"
+      cidrs:
+        - "10.0.0.0/8"
+      rules:
+        - host: "api.openai.com"
+          methods: ["POST"]
+          paths: ["/v1/*"]
+        - host: "*.anthropic.com"
+          methods: ["POST"]
+          paths: ["/v1/messages", "/v1/complete"]
+
+  - name: secrets
+    config:
+      source: env
+      secrets:
+        - var: OPENAI_API_KEY
+          proxy_value: "proxy-openai-abc123"
+          match_headers: ["Authorization"]
+          match_body: false
+          hosts:
+            - name: "api.openai.com"
+
+  - name: grpc
+    config:
+      name: "policy-engine"
+      target: "localhost:9500"
+      send_request_body: true
+      send_response_body: true
+      rules:
+        - host: "api.openai.com"
+          methods: ["POST"]
+          paths: ["/v1/*"]
+      tls:
+        enabled: true
+        ca_cert: "/etc/iron-proxy/grpc-ca.pem"
+        cert: "/etc/iron-proxy/grpc-client.pem"
+        key: "/etc/iron-proxy/grpc-client-key.pem"
+
+metrics:
+  listen: ":9090"
+
+log:
+  level: "info"
+```
+
+## `dns`
+
+Configures the built-in DNS server. The DNS server returns `proxy_ip` for all lookups so that outbound traffic routes through the proxy.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `listen` | string | `":53"` | Address and port the DNS server binds to. |
+| `proxy_ip` | string | **required** | IP address where iron-proxy is running. All DNS responses resolve to this IP. |
+| `upstream_resolver` | string | OS default | Upstream DNS resolver address (e.g., `"8.8.8.8:53"`). When set, both passthrough DNS queries and upstream HTTP connections resolve via this server instead of the OS default. Useful when iron-proxy owns the system DNS. |
+| `passthrough` | string[] | `[]` | Domain glob patterns that are forwarded to the upstream resolver instead of being intercepted. Useful for internal DNS names that should not route through the proxy. |
+| `records` | object[] | `[]` | Static DNS records. These take precedence over interception and passthrough. See below. |
+
+### `dns.records[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Domain name for the record. |
+| `type` | string | Record type: `A` or `CNAME`. |
+| `value` | string | IP address (for `A` records) or target hostname (for `CNAME` records). |
+
+## `proxy`
+
+Configures the HTTP/HTTPS proxy listeners.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `http_listen` | string | `":80"` | Address and port for HTTP traffic. |
+| `https_listen` | string | `":443"` | Address and port for HTTPS traffic. |
+| `max_request_body_bytes` | integer | `1048576` (1 MiB) | Maximum request body size that the proxy will buffer. Bodies are only buffered when a transform needs to inspect them. |
+| `max_response_body_bytes` | integer | `0` (unlimited) | Maximum response body size that the proxy will buffer. Set to `0` to disable the limit. |
+
+## `tls`
+
+Configures TLS interception. iron-proxy uses the provided CA certificate to mint leaf certificates on the fly for each upstream host.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ca_cert` | string | **required** | Path to the CA certificate file (PEM format). |
+| `ca_key` | string | **required** | Path to the CA private key file (PEM format). |
+| `cert_cache_size` | integer | `1000` | Number of generated leaf certificates to keep in the LRU cache. |
+| `leaf_cert_expiry_hours` | integer | `72` | Validity duration (in hours) for generated leaf certificates. |
+
+## `transforms`
+
+An ordered array of transforms that run on every request. All transforms must pass for the request to be forwarded upstream. Transforms execute in the order they appear in the configuration.
+
+Each transform has a `name` and a `config` object. The available transforms are documented below.
+
+### `allowlist`
+
+Controls which destinations are reachable through the proxy. Requests to destinations not in the allowlist receive an HTTP 403 response.
+
+There are two ways to specify allowed destinations: flat lists (`domains` and `cidrs`) that allow all methods and paths, and `rules` that support method and path restrictions. Both can be used together in the same allowlist.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `domains` | string[] | `[]` | Hostname glob patterns to allow (e.g., `registry.npmjs.org`, `*.anthropic.com`). All methods and paths are permitted. |
+| `cidrs` | string[] | `[]` | CIDR ranges to allow (e.g., `10.0.0.0/8`). All methods and paths are permitted. |
+| `rules` | object[] | `[]` | Rules with optional method and path restrictions. See below. |
+| `warn` | boolean | `false` | When `true`, violations are logged but not blocked. Useful for rolling out allowlists incrementally. |
+
+#### `allowlist.rules[]`
+
+Each rule matches a single host or CIDR, with optional method and path filters. A request is allowed if it matches any rule (or any flat `domains`/`cidrs` entry).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `host` | string | | Hostname glob pattern. Mutually exclusive with `cidr`. |
+| `cidr` | string | | CIDR range. Mutually exclusive with `host`. |
+| `methods` | string[] | all | HTTP methods to allow (e.g., `["GET", "POST"]`). Omit to allow all methods. |
+| `paths` | string[] | all | Path patterns to allow (e.g., `["/v1/*"]`). Must start with `/`. Supports `*` wildcards. Omit to allow all paths. |
+
+### `secrets`
+
+Swaps proxy tokens for real secret values at the egress boundary. Real secrets are never exposed to the sandboxed environment. Query parameters are always scanned for proxy tokens.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `source` | string | **required** | Where to read secret values from. Currently only `env` (environment variables) is supported. |
+| `secrets` | object[] | `[]` | List of secret mappings. See below. |
+
+#### `secrets.secrets[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `var` | string | **required** | Environment variable name containing the real secret value. |
+| `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
+| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
+| `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
+| `hosts` | object[] | `[]` | Restrict secret swapping to specific destinations. If empty, the swap applies to all destinations. See below. |
+
+#### `secrets.secrets[].hosts[]`
+
+Each host entry can specify a hostname pattern or a CIDR range, but not both.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Hostname or glob pattern to match (e.g., `api.openai.com`). |
+| `cidr` | string | CIDR range to match (e.g., `10.0.0.0/8`). |
+
+### `grpc`
+
+Delegates request and response processing to an external gRPC server implementing the `TransformService` API. You can define multiple `grpc` transforms to pipeline through several servers.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | **required** | Identifier for this transform, used in logs and error messages. |
+| `target` | string | **required** | gRPC server address (e.g., `localhost:9500`). |
+| `send_request_body` | boolean | `false` | When `true`, forward the full request body to the gRPC server. When `false`, only headers are sent. |
+| `send_response_body` | boolean | `false` | When `true`, forward the full response body to the gRPC server. When `false`, only headers are sent. |
+| `rules` | object[] | `[]` | Restrict which requests are forwarded to this server. Uses the same rule format as [`allowlist.rules[]`](#allowlistrules). If empty, all requests are forwarded. |
+| `tls` | object | | TLS configuration for the gRPC connection. See below. |
+
+#### `grpc.tls`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Enable TLS for the gRPC connection. When `false`, the connection uses plaintext. |
+| `ca_cert` | string | system default | Path to a custom CA certificate for server verification. |
+| `cert` | string | | Path to a client certificate for mTLS. Must be set together with `key`. |
+| `key` | string | | Path to the client private key for mTLS. Must be set together with `cert`. |
+
+## `metrics`
+
+Configures the OpenTelemetry/Prometheus metrics endpoint.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `listen` | string | `":9090"` | Address and port for the metrics endpoint. |
+
+## `log`
+
+Configures logging output.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `level` | string | `"info"` | Log verbosity. One of `debug`, `info`, `warn`, or `error`. |
