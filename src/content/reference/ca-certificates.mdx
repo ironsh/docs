@@ -3,7 +3,7 @@ title: "CA Certificates"
 description: "Reference for generating, configuring, and trusting the CA certificate used by iron-proxy for TLS interception."
 ---
 
-# CA Certificate
+# CA Certificates
 
 iron-proxy intercepts TLS traffic by acting as a man-in-the-middle: it terminates the client's TLS connection, inspects or transforms the request, then opens a new TLS connection to the upstream server. To do this, it needs a CA certificate and private key to mint leaf certificates on the fly for each upstream host.
 
