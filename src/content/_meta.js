@@ -2,5 +2,5 @@ export default {
   index: "Overview",
   quickstart: "Quickstart",
   guides: "Guides",
-  reference: "Legacy Platform",
+  legacy: "Legacy Platform",
 };
