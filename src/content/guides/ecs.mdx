@@ -3,15 +3,14 @@ title: Amazon ECS Integration
 description: "Lock down egress traffic on ECS clusters using iron-proxy as a daemon service."
 ---
 
-import { Callout, Steps } from "nextra/components";
+import { Steps } from "nextra/components";
 
 # Amazon ECS Integration
 
 This guide walks through running iron-proxy as a [daemon service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html#service_scheduler_daemon) on Amazon ECS. iron-proxy intercepts all outbound HTTP/HTTPS traffic from workload containers and checks it against a domain allowlist.
 
-<Callout type="warning">
-Fargate is not supported. Fargate doesn't allow per-container DNS overrides, which iron-proxy requires to intercept traffic. This guide requires ECS with the EC2 launch type.
-</Callout>
+> [!WARNING]
+> Fargate is not supported. Fargate doesn't allow per-container DNS overrides, which iron-proxy requires to intercept traffic. This guide requires ECS with the EC2 launch type.
 
 ## How It Works
 
@@ -328,9 +327,8 @@ Start in warn mode, then switch to enforce mode once your allowlist is dialed in
 
 ## Preventing Circumvention
 
-<Callout type="warning">
-This section is strongly recommended to prevent workloads from bypassing your egress rules.
-</Callout>
+> [!WARNING]
+> This section is strongly recommended to prevent workloads from bypassing your egress rules.
 
 This isn't required to run the demo above. Setting `dnsServers` routes DNS through iron-proxy, but a workload container could still bypass the proxy by connecting to an IP address directly. To prevent this, add `iptables` rules to the EC2 instance that force all outbound traffic from containers through iron-proxy.
 
