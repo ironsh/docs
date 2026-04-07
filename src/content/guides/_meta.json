@@ -1,6 +1,5 @@
 {
   "github-actions": "GitHub Actions",
   "ecs": "Amazon ECS",
-  "otel-export": "Exporting Logs to OTEL",
-  "help": "Getting Help"
+  "otel-export": "Exporting Logs to OTEL"
 }
