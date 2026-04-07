@@ -1,0 +1,101 @@
+---
+title: Exporting Logs to OpenTelemetry
+description: "Ship iron-proxy audit logs to any OTLP-compatible backend like Axiom, ClickHouse, or Logfire."
+---
+
+# Exporting Logs to OpenTelemetry
+
+Starting in `v0.7.0`, iron-proxy can export audit logs as OpenTelemetry structured log records. This lets you send every proxied request to any OTLP-compatible backend: Axiom, ClickHouse, Logfire, Grafana Cloud, or your own collector.
+
+OTEL export runs alongside the existing JSON stderr logs. When enabled, every audit event is emitted as an OTEL log record carrying the same schema: `host`, `method`, `path`, `action`, `status_code`, `duration_ms`, and the full `request_transforms`/`response_transforms` arrays with annotations.
+
+## Configuration
+
+OTEL export is configured entirely through environment variables. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable it:
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector URL. Export is disabled when unset. | (disabled) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` or `grpc`. | `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` pairs for auth headers. | (none) |
+| `OTEL_SERVICE_NAME` | Service name attached to all log records. | `iron-proxy` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Comma-separated `key=value` resource attributes. | (none) |
+
+These are standard OTEL environment variables, so they work the same way across all OpenTelemetry-instrumented services.
+
+## Example: Docker
+
+Pass the OTEL variables as environment variables on the iron-proxy container:
+
+```bash
+docker run -d --name iron-proxy \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4318 \
+  -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+  -e OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <token>" \
+  -e OTEL_SERVICE_NAME=iron-proxy \
+  -e OTEL_RESOURCE_ATTRIBUTES="deployment.environment=staging" \
+  -v $(pwd)/proxy.yaml:/etc/iron-proxy/proxy.yaml:ro \
+  -v $(pwd)/certs/ca.crt:/etc/iron-proxy/ca.crt:ro \
+  -v $(pwd)/certs/ca.key:/etc/iron-proxy/ca.key:ro \
+  ironsh/iron-proxy:latest -config /etc/iron-proxy/proxy.yaml
+```
+
+## Example: Docker Compose
+
+Add the variables to your `environment` block:
+
+```yaml
+services:
+  proxy:
+    image: ironsh/iron-proxy:latest
+    command: ["-config", "/etc/iron-proxy/proxy.yaml"]
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
+      - OTEL_SERVICE_NAME=iron-proxy
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=staging
+    volumes:
+      - ./proxy.yaml:/etc/iron-proxy/proxy.yaml:ro
+      - ./certs/ca.crt:/etc/iron-proxy/ca.crt:ro
+      - ./certs/ca.key:/etc/iron-proxy/ca.key:ro
+```
+
+## Example: Amazon ECS
+
+If you followed the [ECS guide](/guides/ecs), add the OTEL variables to the iron-proxy container definition:
+
+```json
+{
+  "name": "iron-proxy",
+  "image": "docker.io/ironsh/iron-proxy:latest",
+  "environment": [
+    { "name": "AWS_REGION", "value": "YOUR_REGION" },
+    { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "https://otel-collector.example.com:4318" },
+    { "name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf" },
+    { "name": "OTEL_SERVICE_NAME", "value": "iron-proxy" },
+    { "name": "OTEL_RESOURCE_ATTRIBUTES", "value": "deployment.environment=production" }
+  ]
+}
+```
+
+For the `OTEL_EXPORTER_OTLP_HEADERS` value (which typically contains an auth token), use [AWS Secrets Manager](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data-secrets.html) instead of a plaintext environment variable:
+
+```json
+"secrets": [
+  {
+    "name": "OTEL_EXPORTER_OTLP_HEADERS",
+    "valueFrom": "arn:aws:secretsmanager:YOUR_REGION:YOUR_ACCOUNT_ID:secret:iron-proxy/otel-headers"
+  }
+]
+```
+
+## Verifying
+
+Once configured, iron-proxy will log a message at startup confirming the OTEL exporter is active:
+
+```
+{"level":"info","msg":"otel exporter enabled","endpoint":"https://otel-collector.example.com:4318","protocol":"http/protobuf"}
+```
+
+Check your backend for incoming log records. Each record contains the same fields as the JSON audit log, so you can query by `host`, `action`, `status_code`, or any other field.
