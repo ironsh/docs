@@ -225,3 +225,15 @@ Configures logging output.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `level` | string | `"info"` | Log verbosity. One of `debug`, `info`, `warn`, or `error`. |
+
+## OpenTelemetry Environment Variables
+
+OTEL log export is configured through environment variables, not the YAML config file. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable it. See the [OTEL export guide](/guides/otel-export) for usage examples.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | string | (disabled) | OTLP collector URL (e.g., `https://otel-collector.example.com:4318`). Export is disabled when unset. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | string | `http/protobuf` | Transport protocol: `http/protobuf` or `grpc`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | string | (none) | Comma-separated `key=value` pairs sent as headers on every export request. Typically used for authentication. |
+| `OTEL_SERVICE_NAME` | string | `iron-proxy` | Service name attached to all log records. |
+| `OTEL_RESOURCE_ATTRIBUTES` | string | (none) | Comma-separated `key=value` resource attributes added to all log records (e.g., `deployment.environment=staging`). |
