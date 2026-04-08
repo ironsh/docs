@@ -1,0 +1,323 @@
+---
+title: Freestyle Integration
+description: "Run iron-proxy inside Freestyle VMs using pre-baked snapshots for fast, repeatable egress control."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Freestyle Integration
+
+This guide walks through running iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You will create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
+
+<Callout type="warning">
+Freestyle does not expose iptables kernel modules to guest VMs. This means you cannot add firewall rules to block direct IP connections. If a process inside the VM connects to an IP address directly (bypassing DNS), iron-proxy cannot intercept that traffic. Egress control is limited to DNS-based interception only.
+</Callout>
+
+## How It Works
+
+The setup has two phases:
+
+1. **Snapshot creation:** A one-time script builds a Freestyle VM that installs iron-proxy, generates a CA certificate, trusts it system-wide, and configures DNS to resolve through the proxy. Freestyle snapshots the result.
+2. **VM launch:** New VMs boot from the snapshot with iron-proxy already running. DNS queries resolve through iron-proxy, which checks them against your allowlist and terminates TLS using per-domain leaf certificates.
+
+Because iron-proxy owns DNS inside the VM, all domain-based traffic flows through the proxy automatically. There is no need for per-process configuration or custom environment variables.
+
+## Prerequisites
+
+- A [Freestyle](https://freestyle.sh) account with API access
+- Node.js 18+
+- A `FREESTYLE_API_KEY` environment variable set in your shell
+
+## Setup
+
+<Steps>
+
+### Install the Freestyle SDK
+
+```bash
+npm install freestyle-sandboxes
+```
+
+### Create the Snapshot Script
+
+Save this as `create-snapshot.mjs`. It builds a Debian VM, installs iron-proxy, generates a trusted CA, and snapshots the result.
+
+```javascript
+import { freestyle, VmSpec, VmBaseImage } from "freestyle-sandboxes";
+
+const IRON_PROXY_VERSION = process.env.IRON_PROXY_VERSION || "latest";
+
+// iron-proxy configuration
+const ironProxyConfig = `
+dns:
+  listen: ":53"
+  proxy_ip: "127.0.0.1"
+  upstream_resolver: "8.8.8.8:53"
+proxy:
+  http_listen: ":80"
+  https_listen: ":443"
+tls:
+  ca_cert: "/etc/iron-proxy/ca.crt"
+  ca_key: "/etc/iron-proxy/ca.key"
+transforms:
+  - name: allowlist
+    config:
+      warn: false
+      domains: []
+log:
+  level: "info"
+`.trimStart();
+
+// Oneshot script: download iron-proxy, generate CA, trust CA, stop systemd-resolved
+const installScript = `#!/bin/bash
+set -euo pipefail
+
+# Resolve version
+VERSION="${IRON_PROXY_VERSION}"
+if [ "$VERSION" = "latest" ]; then
+  VERSION=$(curl -fsSL https://api.github.com/repos/ironsh/iron-proxy/releases/latest | jq -r '.tag_name | ltrimstr("v")')
+fi
+echo "Installing iron-proxy v$VERSION"
+
+# Download and install binary
+curl -fsSL -o /tmp/iron-proxy.tgz \\
+  "https://github.com/ironsh/iron-proxy/releases/download/v\${VERSION}/iron-proxy_\${VERSION}_linux_amd64.tar.gz"
+tar -xzf /tmp/iron-proxy.tgz -C /tmp
+mv /tmp/iron-proxy /usr/local/bin/iron-proxy
+chmod +x /usr/local/bin/iron-proxy
+rm -f /tmp/iron-proxy.tgz
+
+# Generate CA for TLS interception
+mkdir -p /etc/iron-proxy
+openssl genrsa -out /etc/iron-proxy/ca.key 2048 2>/dev/null
+openssl req -x509 -new -nodes \\
+  -key /etc/iron-proxy/ca.key \\
+  -sha256 -days 365 \\
+  -subj "/CN=iron-proxy CA" \\
+  -addext "basicConstraints=critical,CA:TRUE" \\
+  -addext "keyUsage=critical,keyCertSign" \\
+  -out /etc/iron-proxy/ca.crt 2>/dev/null
+
+# Trust the CA system-wide
+cp /etc/iron-proxy/ca.crt /usr/local/share/ca-certificates/iron-proxy-ca.crt
+update-ca-certificates
+
+# Stop systemd-resolved to free port 53
+systemctl stop systemd-resolved || true
+systemctl disable systemd-resolved || true
+
+# Route DNS through the proxy
+echo "nameserver 127.0.0.1" > /etc/resolv.conf
+`;
+
+async function main() {
+  const baseImage = new VmBaseImage("FROM debian:trixie-slim").runCommands(
+    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates openssl jq"
+  );
+
+  const spec = new VmSpec()
+    .baseImage(baseImage)
+    .additionalFiles({
+      "/etc/iron-proxy/config.yaml": { content: ironProxyConfig },
+      "/usr/local/bin/install-iron-proxy.sh": { content: installScript },
+    })
+    .systemdService({
+      name: "install-iron-proxy",
+      mode: "oneshot",
+      exec: ["bash /usr/local/bin/install-iron-proxy.sh"],
+      wantedBy: ["multi-user.target"],
+      remainAfterExit: true,
+      timeoutSec: 120,
+    })
+    .systemdService({
+      name: "iron-proxy",
+      mode: "service",
+      exec: ["/usr/local/bin/iron-proxy -config /etc/iron-proxy/config.yaml"],
+      after: ["install-iron-proxy.service"],
+      requires: ["install-iron-proxy.service"],
+      env: {
+        SSL_CERT_FILE: "/etc/iron-proxy/ca.crt",
+        NODE_EXTRA_CA_CERTS: "/etc/iron-proxy/ca.crt",
+        REQUESTS_CA_BUNDLE: "/etc/iron-proxy/ca.crt",
+      },
+      restartPolicy: {
+        policy: "on-failure",
+        restartSec: 5,
+      },
+    });
+
+  console.log("Creating iron-proxy VM and snapshotting...");
+  const { vm, snapshotId } = await freestyle.vms.create({
+    snapshot: spec,
+    persistence: { type: "ephemeral" },
+  });
+
+  // Verify everything is running
+  const status = await vm.exec("systemctl status iron-proxy --no-pager");
+  console.log("\niron-proxy service status:");
+  console.log(status.stdout);
+
+  const resolv = await vm.exec("cat /etc/resolv.conf");
+  console.log("DNS configuration:");
+  console.log(resolv.stdout);
+
+  await vm.stop();
+  console.log(`\nSnapshot ID: ${snapshotId}`);
+  console.log(
+    "Done. Use this snapshotId to create ephemeral VMs with iron-proxy pre-configured."
+  );
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+```
+
+A few things to note about this script:
+
+- **`dns.proxy_ip`** is set to `127.0.0.1` because iron-proxy runs inside the same VM as your workloads.
+- **`dns.upstream_resolver`** uses `8.8.8.8:53`. Change this if your network requires a different upstream resolver.
+- **`warn: false`** means non-allowlisted requests are blocked immediately. Set to `true` while building your allowlist.
+- **`domains: []`** starts with an empty allowlist. Add the domains your workloads need before creating the snapshot.
+- The install script disables `systemd-resolved` and points `/etc/resolv.conf` at `127.0.0.1` so all DNS goes through iron-proxy.
+- The CA is trusted system-wide via `update-ca-certificates`, and common runtime environment variables (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`) are set on the iron-proxy service.
+
+### Bootstrap the Snapshot
+
+Run the script to create your snapshot. This requires a `FREESTYLE_API_KEY` in your environment:
+
+```bash
+export FREESTYLE_API_KEY="your-api-key"
+node create-snapshot.mjs
+```
+
+The first run will take longer than usual because Freestyle needs to build the base image from scratch. You should expect to see output like this:
+
+```
+Creating iron-proxy VM and snapshotting...
+VM creation is taking longer than expected. This usually happens when there's a cache miss on your vm's base snapshot. Subsequent vm creations with this configuration will likely be much faster.
+iron-proxy service status:
+● iron-proxy.service - iron-proxy
+     Loaded: loaded (/etc/systemd/system/iron-proxy.service; enabled; preset: enabled)
+     Active: active (running) since Wed 2026-04-08 19:50:52 UTC; 4s ago
+ Invocation: 54e29589b0bd4aaa827f7bd0ef8370d2
+   Main PID: 1984 (iron-proxy)
+      Tasks: 10 (limit: 9551)
+     Memory: 3M (peak: 3.6M)
+        CPU: 51ms
+     CGroup: /system.slice/iron-proxy.service
+             └─1984 /usr/local/bin/iron-proxy -config /etc/iron-proxy/config.yaml
+...
+DNS configuration:
+nameserver 127.0.0.1
+Snapshot ID: sc-gogdcl41ilq3jabxytjn
+Done. Use this snapshotId to create ephemeral VMs with iron-proxy pre-configured.
+```
+
+Save the snapshot ID. You will use it to launch new VMs.
+
+### Launch VMs From the Snapshot
+
+Use the snapshot ID to create ephemeral VMs with iron-proxy already running:
+
+```javascript
+import { freestyle } from "freestyle-sandboxes";
+
+const { vm } = await freestyle.vms.create({
+  snapshotId: "sc-abc123...",
+  persistence: { type: "ephemeral" },
+});
+
+// Traffic is already routed through iron-proxy
+const result = await vm.exec("curl -s https://httpbin.org/get");
+console.log(result.stdout);
+
+await vm.stop();
+```
+
+### Verify
+
+Check that iron-proxy is intercepting traffic inside a running VM:
+
+```bash
+# Inside the VM (via vm.exec or SSH)
+systemctl status iron-proxy
+```
+
+You should see the service active and running. Make a test request to confirm:
+
+```bash
+curl -sv https://httpbin.org/get 2>&1 | grep "issuer"
+```
+
+If iron-proxy is working, the TLS certificate issuer will be `iron-proxy CA` rather than the real upstream issuer.
+
+</Steps>
+
+## Customizing the Allowlist
+
+Edit the `domains` array in the `ironProxyConfig` string before creating the snapshot:
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      warn: false
+      domains:
+        - "registry.npmjs.org"
+        - "pypi.org"
+        - "api.github.com"
+```
+
+To update an existing deployment, re-run `create-snapshot.mjs` to produce a new snapshot ID, then update your application to use the new ID.
+
+For the full set of configuration options, see the [configuration reference](/reference/configuration).
+
+## Egress Control Limitations
+
+<Callout type="warning">
+Freestyle VMs do not expose iptables kernel modules, so you cannot add firewall rules inside the guest.
+</Callout>
+
+On platforms like [Amazon ECS](/guides/ecs), you can use iptables to force all outbound traffic through iron-proxy at the kernel level. This prevents workloads from bypassing the proxy by connecting to an IP address directly.
+
+Freestyle does not support this. iron-proxy's egress control relies entirely on DNS interception: it works because `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
+
+In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level network control.
+
+## Trusting the CA
+
+The snapshot script trusts the CA system-wide and sets common runtime environment variables. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+
+## Troubleshooting
+
+### iron-proxy service is not running
+
+Check the service logs:
+
+```bash
+journalctl -u iron-proxy --no-pager -n 50
+```
+
+If the install oneshot failed, check that too:
+
+```bash
+journalctl -u install-iron-proxy --no-pager -n 50
+```
+
+Common causes: network issues during the iron-proxy binary download, or a version string that does not match a GitHub release.
+
+### DNS resolution fails
+
+Verify that `/etc/resolv.conf` points at `127.0.0.1`:
+
+```bash
+cat /etc/resolv.conf
+```
+
+If it was overwritten (e.g., by DHCP), the snapshot's `systemd-resolved` disable may not have taken effect. Re-run the snapshot creation.
+
+### TLS certificate errors
+
+If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during snapshot creation, and ensure the appropriate environment variable is set for your runtime. See [CA Certificates](/reference/ca-certificates) for details.
