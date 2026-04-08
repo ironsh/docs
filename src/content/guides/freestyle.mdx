@@ -286,6 +286,10 @@ Freestyle does not support this. iron-proxy's egress control relies entirely on 
 
 In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level network control.
 
+### Freestyle's Built-In Egress Control
+
+If you use Freestyle's [serverless runs](https://docs.freestyle.sh/v2/serverless/runs), you can use Freestyle's built-in network permissions instead of iron-proxy. Serverless runs support allow and deny rules that restrict which domains the run can access at the platform level. When an allow rule is specified, only whitelisted domains are accessible and all other requests are blocked. This is a simpler alternative if you do not need iron-proxy's TLS interception, logging, or transform features.
+
 ## Trusting the CA
 
 The snapshot script trusts the CA system-wide and sets common runtime environment variables. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
