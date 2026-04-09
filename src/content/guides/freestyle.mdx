@@ -280,7 +280,7 @@ Normally, you would use iptables to block all outbound traffic except from iron-
 
 Without iptables enforcement, iron-proxy's egress control on Freestyle relies entirely on DNS interception: `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
 
-In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level network control.
+In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level egress control, or use [Freestyle's built-in network permissions](#freestyles-built-in-egress-control).
 
 ### Freestyle's Built-In Egress Control
 
