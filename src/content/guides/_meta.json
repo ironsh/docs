@@ -2,5 +2,6 @@
   "github-actions": "GitHub Actions",
   "ecs": "Amazon ECS",
   "freestyle": "Freestyle",
+  "daytona": "Daytona",
   "otel-export": "Exporting Logs to OTEL"
 }
