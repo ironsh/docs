@@ -135,11 +135,6 @@ async function main() {
       exec: ["/usr/local/bin/iron-proxy -config /etc/iron-proxy/config.yaml"],
       after: ["install-iron-proxy.service"],
       requires: ["install-iron-proxy.service"],
-      env: {
-        SSL_CERT_FILE: "/etc/iron-proxy/ca.crt",
-        NODE_EXTRA_CA_CERTS: "/etc/iron-proxy/ca.crt",
-        REQUESTS_CA_BUNDLE: "/etc/iron-proxy/ca.crt",
-      },
       restartPolicy: {
         policy: "on-failure",
         restartSec: 5,
@@ -181,7 +176,7 @@ A few things to note about this script:
 - **`warn: false`** means non-allowlisted requests are blocked immediately. Set to `true` while building your allowlist.
 - **`domains: []`** starts with an empty allowlist. Add the domains your workloads need before creating the snapshot.
 - The install script disables `systemd-resolved` and points `/etc/resolv.conf` at `127.0.0.1` so all DNS goes through iron-proxy.
-- The CA is trusted system-wide via `update-ca-certificates`, and common runtime environment variables (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`) are set on the iron-proxy service.
+- The CA is trusted system-wide via `update-ca-certificates`.
 
 ### Bootstrap the Snapshot
 
