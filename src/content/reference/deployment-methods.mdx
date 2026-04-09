@@ -1,0 +1,181 @@
+---
+title: Deployment Methods
+description: "Compare ways to deploy iron-proxy: standalone host, network proxy, sidecar container, or embedded in a VM/sandbox."
+---
+
+import { Callout } from "nextra/components";
+
+# Deployment Methods
+
+iron-proxy is a single binary that runs anywhere. How you deploy it determines the tradeoffs between circumvention resistance, operational complexity, and isolation. This guide covers four common patterns and when to use each.
+
+## Standalone Host
+
+iron-proxy runs on a dedicated machine (bare metal, EC2 instance, or VM) that sits between your workloads and the internet. Workloads on the same host or network point their DNS at the proxy, and iptables rules on the host prevent anything from bypassing it.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Host                                                      │
+│                                                           │
+│  ┌──────────┐  ┌──────────┐                               │
+│  │workload-A│  │workload-B│                               │
+│  │          │  │          │                               │
+│  │ dns: ────┼──┼──────────┼──► iron-proxy ──► internet    │
+│  │ proxy IP │  │ dns:     │    :53 :80 :443               │
+│  │          │  │ proxy IP │                               │
+│  └──────────┘  └──────────┘                               │
+│                                                           │
+│  iptables: DROP all outbound except from iron-proxy       │
+└──────────────────────────────────────────────────────────┘
+```
+
+This is the pattern used in the [Amazon ECS guide](/guides/ecs), where iron-proxy runs as a daemon service on each EC2 instance and workload containers share the host's Docker bridge network.
+
+### Pros
+
+- **Strong circumvention resistance.** Host-level iptables rules prevent workloads from reaching the internet directly. Even if a workload hardcodes an IP address or uses its own DNS resolver, the traffic is dropped.
+- **Shared across workloads.** One proxy instance covers all containers or processes on the host. Configuration and CA certificates live in one place.
+- **Simple networking.** Workloads just need their DNS pointed at the proxy. No per-container network plumbing required.
+
+### Cons
+
+- **Requires host access.** You need control over the host's network stack to set up iptables rules. This rules out managed container platforms like AWS Fargate or Google Cloud Run.
+- **Shared failure domain.** If iron-proxy goes down, all workloads on the host lose network access. You need to plan for restarts and health checks.
+- **IP assignment can be fragile.** On Docker bridge networks, iron-proxy's IP depends on container startup order. If a workload starts before the proxy, DNS resolution fails. Daemon services or init containers help here.
+
+### When to Use
+
+Use this when you control the host and run multiple workloads that share a network. Container orchestrators with daemon scheduling (ECS daemon services, Kubernetes DaemonSets) are a natural fit.
+
+## Network Proxy
+
+iron-proxy runs on a dedicated box in your network, separate from the machines running your workloads. Workload hosts use security groups, iptables, or firewall rules to ensure all outbound traffic routes through the proxy box. Nothing else is allowed to reach the internet directly.
+
+```
+┌──────────┐  ┌──────────┐
+│workload-A│  │workload-B│
+│          │  │          │
+│ dns:     │  │ dns:     │
+│ proxy IP │  │ proxy IP │
+└────┬─────┘  └────┬─────┘
+     │              │
+     ▼              ▼
+┌──────────────────────────┐
+│ iron-proxy box            │
+│ 10.0.1.50                 │
+│ :53  :80  :443            │
+└────────────┬─────────────┘
+             │
+             ▼
+        internet
+
+Security groups / firewall:
+  workload hosts → 10.0.1.50:53,80,443  ALLOW
+  workload hosts → 0.0.0.0/0            DENY
+```
+
+### Pros
+
+- **Strongest circumvention resistance.** Enforcement happens outside the workload's trust boundary. A compromised workload cannot modify security group rules or firewall settings, even with root access on its own host. This makes it the hardest deployment model to bypass.
+- **No host or container access needed on workload machines.** You do not need to install anything on the workload hosts themselves.
+- **Centralized management.** One proxy instance (or a small cluster behind a load balancer) serves your entire fleet. Policy, CA certificates, and audit logs live in one place.
+- **Works with any compute platform.** VMs, containers, bare metal, managed services: if the platform supports security groups or outbound firewall rules, you can route traffic through the proxy box.
+
+### Cons
+
+- **Depends on correct network configuration.** Security groups and firewall rules must be correctly configured and locked down. If a workload host can modify its own routing or security group rules, it can bypass the proxy.
+- **Single point of failure.** All workloads depend on the proxy box for network access. You need redundancy (multiple instances behind a load balancer, health checks, auto-scaling) to avoid downtime.
+- **Network latency.** Traffic takes an extra hop through the proxy box. For most workloads this is negligible, but latency-sensitive applications may notice.
+- **CA distribution.** Workload hosts still need to trust iron-proxy's CA certificate for TLS interception. You need a mechanism to distribute the CA (baked into images, pulled from a shared store, etc.).
+
+### When to Use
+
+Use this when you want centralized egress control across many machines and your network layer supports outbound firewall rules. Cloud environments with security groups (AWS, GCP, Azure) are a natural fit. This is also a good option when you cannot modify the workload hosts but can control network routing.
+
+## Sidecar
+
+iron-proxy runs as a sidecar container alongside each workload container. The two containers share a network namespace (e.g., a Kubernetes pod or a Docker Compose service with `network_mode`), so the workload connects to iron-proxy on `127.0.0.1`.
+
+```
+┌─────────────────────────────────────────────┐
+│ Pod / Compose service                        │
+│ (shared network namespace)                   │
+│                                              │
+│  ┌──────────┐    ┌──────────────────┐        │
+│  │ workload │    │ iron-proxy       │        │
+│  │          │───►│ :53 :80 :443     │──► internet
+│  │ dns:     │    │                  │        │
+│  │ 127.0.0.1│    └──────────────────┘        │
+│  └──────────┘                                │
+└─────────────────────────────────────────────┘
+```
+
+### Pros
+
+- **Works on managed platforms.** Sidecars run in the same pod or task as your workload, so you do not need host-level access. This works on Kubernetes, Docker Compose, and some managed container platforms.
+- **Per-workload isolation.** Each workload gets its own proxy instance with its own policy. A misconfiguration or crash only affects one workload.
+- **Predictable networking.** The proxy is always at `127.0.0.1`. No bridge IP guessing or startup ordering issues.
+
+### Cons
+
+- **Weaker circumvention resistance without network policies.** In a shared network namespace, the workload and proxy share the same IP. You cannot use iptables `--uid-owner` rules inside a standard container unless it has `NET_ADMIN` capability. Without additional enforcement (e.g., Kubernetes NetworkPolicies, Cilium, or a CNI plugin), a workload can bypass the proxy by connecting to external IPs directly.
+- **More resource overhead.** Each workload runs its own iron-proxy instance. CPU and memory usage scales linearly with the number of workloads.
+- **Configuration duplication.** Policy and CA certificates must be distributed to every sidecar. This is manageable with ConfigMaps or shared volumes, but adds operational surface.
+
+<Callout type="info">
+To make sidecar deployments circumvention-resistant on Kubernetes, pair iron-proxy with NetworkPolicies that restrict pod egress to only the sidecar's ports. This gives you DNS-level and network-level enforcement without requiring host access.
+</Callout>
+
+### When to Use
+
+Use this when you cannot control the host (managed Kubernetes, Fargate-style platforms) or when you need per-workload policy isolation. Pair with network policies for stronger circumvention resistance.
+
+## Embedded in a VM or Sandbox
+
+iron-proxy runs inside the same VM or sandbox as your workload. The proxy binds to `127.0.0.1`, DNS is pointed at localhost, and iptables rules block all non-loopback egress from non-root processes. iron-proxy runs as root so its traffic is allowed through.
+
+```
+┌──────────────────────────────────────────────┐
+│ VM / Sandbox                                  │
+│                                               │
+│  workload (user process)                      │
+│       │                                       │
+│       ▼                                       │
+│  iron-proxy (root, 127.0.0.1)                 │
+│  :53  :80  :443                               │
+│       │                                       │
+│       ▼                                       │
+│  iptables: REJECT non-root, non-loopback      │
+│  egress                                       │
+│       │                                       │
+│       ▼                                       │
+│  internet                                     │
+└──────────────────────────────────────────────┘
+```
+
+This is the pattern used in the [Daytona guide](/guides/daytona) and the [GitHub Actions guide](/guides/github-actions).
+
+### Pros
+
+- **Strong circumvention resistance.** Kernel-level iptables rules prevent non-root processes from reaching the network directly. However, this relies on the workload not being able to escalate to root: if sudo is available or the workload can exploit a privilege escalation, it bypasses the proxy entirely.
+- **Self-contained.** Everything lives inside one VM: proxy, policy, CA, iptables rules. No external dependencies or shared infrastructure.
+- **Good for ephemeral workloads.** Snapshot the VM with iron-proxy pre-installed and boot new instances in seconds. Each gets a fresh, isolated environment.
+
+### Cons
+
+- **One proxy per VM.** Each VM runs its own iron-proxy instance. If you are running many concurrent workloads, this means many proxy instances.
+- **Requires kernel support.** The `--uid-owner` iptables match needs the `xt_owner` kernel module. Some lightweight VM platforms do not include it, which limits you to DNS-only interception.
+- **Privilege management matters.** The iptables rules allow traffic from root. If you forget to drop sudo access before running untrusted code, the workload can escalate to root and bypass the proxy entirely.
+### When to Use
+
+Use this for ephemeral, isolated workloads like AI coding agents, user-submitted code execution, and security-sensitive CI jobs. For the strongest circumvention resistance, pair this with a [network proxy](#network-proxy) so that even a privilege escalation inside the VM cannot bypass egress control.
+
+## Comparison
+
+| | Standalone Host | Network Proxy | Sidecar | VM / Sandbox |
+|---|---|---|---|---|
+| **Circumvention resistance** | Strong (host iptables) | Strongest (enforcement outside workload trust boundary) | Weak without network policies | Strong (kernel iptables, but depends on privilege isolation) |
+| **Host access required** | Yes | No | No | No (but needs kernel module support) |
+| **Workloads per proxy** | Many | Many | One | One |
+| **Operational complexity** | Medium | Medium (plus redundancy) | Medium-High | Low per-instance, higher at scale |
+| **Best for** | Container orchestrators | Centralized fleet control | Managed platforms, per-workload policy | Ephemeral VMs, untrusted code |
