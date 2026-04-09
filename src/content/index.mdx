@@ -33,11 +33,11 @@ For details on DNS interception, TLS termination, certificate minting, and the t
 
 If you run untrusted code that has network access and credentials, you need iron-proxy. That includes CI pipelines with third-party build steps, AI coding agents calling APIs, container platforms executing user-submitted code, or any workload where a compromise could mean silent data exfiltration.
 
-## Open Source and Iron Platform
+## Open Source and Managed Offering
 
 iron-proxy is [open source](https://github.com/ironsh/iron-proxy) and fully functional standalone. Run it anywhere: Docker, Kubernetes, bare metal, CI runners.
 
-When you're operating more than a handful of proxy instances, managing policies, secrets, and audit logs per-instance stops scaling. The **Iron Platform** is an optional control plane that centralizes policy enforcement, secrets management, and audit aggregation across your fleet. See [Iron Platform Overview](/platform) for details.
+When you're operating more than a handful of proxy instances, managing policies, secrets, and audit logs per-instance stops scaling. We're building a managed control plane that centralizes policy enforcement, secrets management, and audit aggregation across your fleet. [Get in touch](https://cal.com/matt-slipper-ironsh/15min) if you're interested.
 
 ## Comparison With Alternatives
 
