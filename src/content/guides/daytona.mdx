@@ -18,13 +18,13 @@ Daytona [blocks most egress traffic by default](https://www.daytona.io/docs/netw
 The setup uses a multi-stage Docker image that bundles iron-proxy into a Debian base. When the container starts, the entrypoint script:
 
 1. Generates a CA certificate for TLS interception and installs it into the system trust store.
-2. Configures iptables rules to redirect outbound HTTP and HTTPS traffic through iron-proxy.
+2. Configures iptables rules to redirect outbound HTTP and HTTPS traffic through iron-proxy, and drops all other non-loopback traffic from non-root processes.
 3. Points DNS at iron-proxy so all domain resolution flows through the proxy.
 4. Starts iron-proxy in the background.
 5. Removes the `daytona` user's sudo access so workloads cannot escalate to root.
 6. Hands off to whatever command you pass in.
 
-Because iptables redirects all non-root outbound TCP traffic on ports 80 and 443, processes inside the sandbox cannot bypass the proxy regardless of how they make network requests. The container runs as the unprivileged `daytona` user, and sudo access is revoked after setup completes.
+Because iptables redirects all non-root outbound TCP traffic on ports 80 and 443, and drops all other non-loopback traffic from non-root processes, processes inside the sandbox cannot bypass the proxy regardless of how they make network requests. The container runs as the unprivileged `daytona` user, and sudo access is revoked after setup completes.
 
 ## Prerequisites
 
@@ -101,6 +101,10 @@ fi
 sudo iptables -t nat -A OUTPUT -m owner --uid-owner 0 -j RETURN
 sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
 sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 8080
+sudo iptables -A OUTPUT -o lo -j ACCEPT
+sudo iptables -A OUTPUT -m owner --uid-owner root -j ACCEPT
+sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 
 # Point DNS at iron-proxy
 echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf > /dev/null
