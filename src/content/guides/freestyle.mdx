@@ -10,7 +10,7 @@ import { Callout, Steps } from "nextra/components";
 This guide walks through running iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You will create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
 
 <Callout type="warning">
-Freestyle does not expose iptables kernel modules to guest VMs. This means you cannot add firewall rules to block direct IP connections. If a process inside the VM connects to an IP address directly (bypassing DNS), iron-proxy cannot intercept that traffic. Egress control is limited to DNS-based interception only.
+Freestyle VMs do not include the iptables `owner` match module (`xt_owner`), so egress control is limited to DNS-based interception only. See [Egress Control Limitations](#egress-control-limitations) for details.
 </Callout>
 
 ## How It Works
@@ -276,15 +276,11 @@ For the full set of configuration options, see the [configuration reference](/re
 
 ## Egress Control Limitations
 
-<Callout type="warning">
-Freestyle VMs do not expose iptables kernel modules, so you cannot add firewall rules inside the guest.
-</Callout>
+Normally, you would use iptables to block all outbound traffic except from iron-proxy. This requires the `xt_owner` kernel module, which provides the `--uid-owner` match: it lets you write rules that allow traffic from a specific user (e.g., root, which iron-proxy runs as) while rejecting everything else. Freestyle VMs do not include `xt_owner`, so there is no straightforward way to distinguish traffic from iron-proxy vs. traffic from other processes. Any rule that blocks outbound connections would also block the proxy from reaching upstream servers.
 
-On platforms like [Amazon ECS](/guides/ecs), you can use iptables to force all outbound traffic through iron-proxy at the kernel level. This prevents workloads from bypassing the proxy by connecting to an IP address directly.
+Without iptables enforcement, iron-proxy's egress control on Freestyle relies entirely on DNS interception: `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
 
-Freestyle does not support this. iron-proxy's egress control relies entirely on DNS interception: it works because `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
-
-In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level network control.
+In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level egress control, or use [Freestyle's built-in network permissions](#freestyles-built-in-egress-control).
 
 ### Freestyle's Built-In Egress Control
 
