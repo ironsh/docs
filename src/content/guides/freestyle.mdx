@@ -9,6 +9,10 @@ import { Callout, Steps } from "nextra/components";
 
 This guide walks through running iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You will create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
 
+<Callout type="warning">
+Freestyle VMs do not include the iptables `owner` match module (`xt_owner`), so egress control is limited to DNS-based interception only. See [Egress Control Limitations](#egress-control-limitations) for details.
+</Callout>
+
 ## How It Works
 
 The setup has two phases:
@@ -271,10 +275,6 @@ To update an existing deployment, re-run `create-snapshot.mjs` to produce a new 
 For the full set of configuration options, see the [configuration reference](/reference/configuration).
 
 ## Egress Control Limitations
-
-<Callout type="warning">
-Freestyle VMs do not include the iptables `owner` match module (`xt_owner`), so you cannot write firewall rules that distinguish iron-proxy's traffic from other processes.
-</Callout>
 
 iron-proxy's egress control on Freestyle relies entirely on DNS interception: it works because `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
 
