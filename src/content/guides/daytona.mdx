@@ -1,0 +1,256 @@
+---
+title: Daytona Integration
+description: "Run iron-proxy inside Daytona sandboxes using a custom Docker image for egress control."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Daytona Integration
+
+This guide walks through running iron-proxy inside [Daytona](https://www.daytona.io/) sandboxes. You will build a custom Docker image with iron-proxy pre-installed, then use Daytona's [declarative builder](https://www.daytona.io/docs/en/declarative-builder/) to launch sandboxes with egress control already configured.
+
+<Callout type="info">
+Daytona [blocks most egress traffic by default](https://www.daytona.io/docs/network-limits#_top) depending on your billing tier. iron-proxy gives you granular control over which domains are accessible, TLS interception, and request logging on top of Daytona's built-in restrictions.
+</Callout>
+
+## How It Works
+
+The setup uses a multi-stage Docker image that bundles iron-proxy into a Debian base. When the container starts, the entrypoint script:
+
+1. Generates a CA certificate for TLS interception and installs it into the system trust store.
+2. Configures iptables rules to redirect outbound HTTP and HTTPS traffic through iron-proxy.
+3. Points DNS at iron-proxy so all domain resolution flows through the proxy.
+4. Starts iron-proxy in the background.
+5. Removes the `daytona` user's sudo access so workloads cannot escalate to root.
+6. Hands off to whatever command you pass in.
+
+Because iptables redirects all non-root outbound TCP traffic on ports 80 and 443, processes inside the sandbox cannot bypass the proxy regardless of how they make network requests. The container runs as the unprivileged `daytona` user, and sudo access is revoked after setup completes.
+
+## Prerequisites
+
+- A [Daytona](https://www.daytona.io/) account with API access
+- Python 3.10+
+- The Daytona Python SDK: `pip install daytona`
+
+## Setup
+
+<Steps>
+
+### Create the iron-proxy Configuration
+
+Save this as `iron-proxy.yaml`. This is the configuration file iron-proxy will use at runtime.
+
+```yaml
+dns:
+  listen: ":53"
+  proxy_ip: "127.0.0.1"
+  upstream_resolver: "8.8.8.8:53"
+proxy:
+  http_listen: ":8080"
+  https_listen: ":8443"
+tls:
+  ca_cert: "/etc/iron-proxy/ca.crt"
+  ca_key: "/etc/iron-proxy/ca.key"
+transforms:
+  - name: allowlist
+    config:
+      warn: true
+      domains:
+        - "*"
+log:
+  level: "info"
+```
+
+A few things to note about this configuration:
+
+- **`dns.proxy_ip`** is set to `127.0.0.1` because iron-proxy runs inside the same sandbox as your workloads.
+- **`dns.upstream_resolver`** uses `8.8.8.8:53`. Change this if your network requires a different upstream resolver.
+- **`warn: true`** means non-allowlisted requests are logged but not blocked. Set to `false` to enforce the allowlist.
+- **`domains: ["*"]`** allows all domains. Replace this with specific domains to restrict egress.
+
+For the full set of configuration options, see the [configuration reference](/reference/configuration).
+
+### Create the Entrypoint Script
+
+Save this as `entrypoint.sh`. It runs at container startup to configure networking and start iron-proxy.
+
+```bash
+#!/usr/bin/env bash
+set -uo pipefail
+
+GUARD_FILE="/var/run/iron-proxy-setup-done"
+if [ -f "$GUARD_FILE" ]; then
+  exec "$@"
+fi
+
+# Generate CA cert/key for TLS MITM and install into system trust store
+if [ ! -f /etc/iron-proxy/ca.crt ]; then
+  sudo openssl genrsa -out /etc/iron-proxy/ca.key 4096 2>/dev/null
+  sudo openssl req -x509 -new -nodes \
+    -key /etc/iron-proxy/ca.key \
+    -sha256 -days 3650 \
+    -subj "/CN=iron-proxy CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign" \
+    -out /etc/iron-proxy/ca.crt 2>/dev/null
+  sudo cp /etc/iron-proxy/ca.crt /usr/local/share/ca-certificates/iron-proxy.crt
+  sudo update-ca-certificates 2>/dev/null
+fi
+
+# Redirect non-root TCP egress to iron-proxy
+sudo iptables -t nat -A OUTPUT -m owner --uid-owner 0 -j RETURN
+sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
+sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 8080
+
+# Point DNS at iron-proxy
+echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf > /dev/null
+
+# Start iron-proxy in background
+sudo --preserve-env setsid bash -c '/usr/local/bin/iron-proxy -config /etc/iron-proxy/config.yaml &>/var/log/iron-proxy.log' &
+
+# Add any additional trusted setup here (e.g., cloning repos,
+# installing packages, fetching credentials) while sudo is
+# still available.
+
+# Drop sudo access for daytona user
+sudo rm -f /etc/sudoers.d/daytona
+
+# Mark setup as complete
+touch "$GUARD_FILE"
+
+# Hand off to whatever the user passes in
+exec "$@"
+```
+
+The entrypoint uses `sudo` to configure iptables, generate the CA, and start iron-proxy as root. Once setup is complete, it removes the `daytona` user's sudoers entry so that your workload cannot escalate to root. This is important: the iptables rules skip traffic from root (UID 0) so that iron-proxy itself can reach the upstream without creating a redirect loop. If your workload could escalate to root via `sudo`, it would bypass the proxy entirely.
+
+<Callout type="warning">
+If you do not drop sudo access in the entrypoint, you must do so somewhere in your workload before running untrusted code. Any process that can escalate to root will bypass iron-proxy's iptables rules.
+</Callout>
+
+The guard file (`/var/run/iron-proxy-setup-done`) ensures the setup logic only runs once. If the entrypoint is invoked again, it skips straight to executing your command.
+
+### Create the Dockerfile
+
+Save this as `Dockerfile`. It uses a multi-stage build to pull the iron-proxy binary and bundle it into a Debian base image. The `daytona` user is created with passwordless sudo so the entrypoint can perform privileged setup, then the sudoers entry is removed at the end of the entrypoint.
+
+```dockerfile
+FROM ironsh/iron-proxy:latest AS iron-proxy
+
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iptables iproute2 ca-certificates openssl procps sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=iron-proxy /usr/local/bin/iron-proxy /usr/local/bin/iron-proxy
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+RUN mkdir -p /etc/iron-proxy
+COPY iron-proxy.yaml /etc/iron-proxy/config.yaml
+
+RUN useradd -m -s /bin/bash daytona && \
+    echo "daytona ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/daytona
+
+USER daytona
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+```
+
+### Create the Sandbox
+
+Use the Daytona Python SDK to build the image and launch a sandbox. Save this as `create_sandbox.py`:
+
+```python
+from daytona import Daytona, DaytonaConfig, Image, CreateSandboxFromImageParams
+
+config = DaytonaConfig(api_key="<your-api-key>")
+daytona = Daytona(config)
+
+image = Image.from_dockerfile("Dockerfile")
+sandbox = daytona.create(
+    CreateSandboxFromImageParams(image=image),
+    timeout=0,
+    on_snapshot_create_logs=print,
+)
+
+print(sandbox)
+```
+
+Run it:
+
+```bash
+python create_sandbox.py
+```
+
+Daytona will build the Docker image using its [declarative builder](https://www.daytona.io/docs/en/declarative-builder/), then launch a sandbox from the resulting image. The first build may take longer while the image layers are cached.
+
+### Verify
+
+Once the sandbox is running, verify that iron-proxy is intercepting traffic:
+
+```bash
+curl -sv https://httpbin.org/get 2>&1 | grep "issuer"
+```
+
+If iron-proxy is working, the TLS certificate issuer will be `iron-proxy CA` rather than the real upstream issuer.
+
+You can also check the iron-proxy logs:
+
+```bash
+cat /var/log/iron-proxy.log
+```
+
+</Steps>
+
+## Customizing the Allowlist
+
+Edit the `domains` array in `iron-proxy.yaml` to restrict which domains are accessible:
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      warn: false
+      domains:
+        - "registry.npmjs.org"
+        - "pypi.org"
+        - "api.github.com"
+```
+
+Set `warn` to `false` to block non-allowlisted requests. Rebuild the image and create a new sandbox for changes to take effect.
+
+## Trusting the CA
+
+The entrypoint script trusts the CA system-wide via `update-ca-certificates`. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+
+## Troubleshooting
+
+### iron-proxy Is Not Running
+
+Check the log file:
+
+```bash
+cat /var/log/iron-proxy.log
+```
+
+If the file is empty or missing, the entrypoint script may have failed before starting iron-proxy. Run the entrypoint manually to see errors:
+
+```bash
+/usr/local/bin/entrypoint.sh bash
+```
+
+### DNS Resolution Fails
+
+Verify that `/etc/resolv.conf` points at `127.0.0.1`:
+
+```bash
+cat /etc/resolv.conf
+```
+
+If it was overwritten, the entrypoint may not have run correctly. Check that the container is using the custom entrypoint and not a default one.
+
+### TLS Certificate Errors
+
+If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during container startup, and ensure the appropriate environment variable is set for your runtime. See [CA Certificates](/reference/ca-certificates) for details.
