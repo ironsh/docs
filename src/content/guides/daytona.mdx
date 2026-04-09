@@ -18,13 +18,13 @@ Daytona [blocks most egress traffic by default](https://www.daytona.io/docs/netw
 The setup uses a multi-stage Docker image that bundles iron-proxy into a Debian base. When the container starts, the entrypoint script:
 
 1. Generates a CA certificate for TLS interception and installs it into the system trust store.
-2. Configures iptables rules to redirect outbound HTTP and HTTPS traffic through iron-proxy, and drops all other non-loopback traffic from non-root processes.
-3. Points DNS at iron-proxy so all domain resolution flows through the proxy.
+2. Configures iptables rules to block all non-loopback egress from non-root processes.
+3. Points DNS at iron-proxy so all domain resolution resolves to the proxy's listen address.
 4. Starts iron-proxy in the background.
 5. Removes the `daytona` user's sudo access so workloads cannot escalate to root.
 6. Hands off to whatever command you pass in.
 
-Because iptables redirects all non-root outbound TCP traffic on ports 80 and 443, and drops all other non-loopback traffic from non-root processes, processes inside the sandbox cannot bypass the proxy regardless of how they make network requests. The container runs as the unprivileged `daytona` user, and sudo access is revoked after setup completes.
+Because DNS resolves all domains to iron-proxy's listen address and iptables blocks all non-loopback egress from non-root processes, processes inside the sandbox cannot bypass the proxy. The container runs as the unprivileged `daytona` user, and sudo access is revoked after setup completes.
 
 ## Prerequisites
 
@@ -46,8 +46,8 @@ dns:
   proxy_ip: "127.0.0.1"
   upstream_resolver: "8.8.8.8:53"
 proxy:
-  http_listen: ":8080"
-  https_listen: ":8443"
+  http_listen: ":80"
+  https_listen: ":443"
 tls:
   ca_cert: "/etc/iron-proxy/ca.crt"
   ca_key: "/etc/iron-proxy/ca.key"
@@ -97,10 +97,7 @@ if [ ! -f /etc/iron-proxy/ca.crt ]; then
   sudo update-ca-certificates 2>/dev/null
 fi
 
-# Redirect non-root TCP egress to iron-proxy
-sudo iptables -t nat -A OUTPUT -m owner --uid-owner 0 -j RETURN
-sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 8443
-sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 8080
+# Block non-root, non-loopback egress
 sudo iptables -A OUTPUT -o lo -j ACCEPT
 sudo iptables -A OUTPUT -m owner --uid-owner root -j ACCEPT
 sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
@@ -120,13 +117,13 @@ sudo --preserve-env setsid bash -c '/usr/local/bin/iron-proxy -config /etc/iron-
 sudo rm -f /etc/sudoers.d/daytona
 
 # Mark setup as complete
-touch "$GUARD_FILE"
+sudo touch "$GUARD_FILE"
 
 # Hand off to whatever the user passes in
 exec "$@"
 ```
 
-The entrypoint uses `sudo` to configure iptables, generate the CA, and start iron-proxy as root. Once setup is complete, it removes the `daytona` user's sudoers entry so that your workload cannot escalate to root. This is important: the iptables rules skip traffic from root (UID 0) so that iron-proxy itself can reach the upstream without creating a redirect loop. If your workload could escalate to root via `sudo`, it would bypass the proxy entirely.
+The entrypoint uses `sudo` to configure iptables, generate the CA, and start iron-proxy as root. Once setup is complete, it removes the `daytona` user's sudoers entry so that your workload cannot escalate to root. This is important: the iptables rules allow traffic from root so that iron-proxy itself can reach upstream servers. If your workload could escalate to root via `sudo`, it would bypass the proxy entirely.
 
 <Callout type="warning">
 If you do not drop sudo access in the entrypoint, you must do so somewhere in your workload before running untrusted code. Any process that can escalate to root will bypass iron-proxy's iptables rules.
