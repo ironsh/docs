@@ -280,9 +280,7 @@ For the full set of configuration options, see the [configuration reference](/re
 Freestyle VMs do not include the iptables `owner` match module (`xt_owner`), so you cannot write firewall rules that distinguish iron-proxy's traffic from other processes.
 </Callout>
 
-On platforms like [Amazon ECS](/guides/ecs) and [Daytona](/guides/daytona), you can use iptables with the `--uid-owner` match to allow traffic from iron-proxy (running as root) while blocking all other outbound traffic. This prevents workloads from bypassing the proxy by connecting to an IP address directly.
-
-Freestyle's kernel does not include the `xt_owner` module, so this approach is not possible. Without a way to exempt iron-proxy's own traffic, any rule that blocks outbound connections would also block the proxy from reaching upstream servers. As a result, iron-proxy's egress control on Freestyle relies entirely on DNS interception: it works because `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
+iron-proxy's egress control on Freestyle relies entirely on DNS interception: it works because `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
 
 In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level network control.
 
