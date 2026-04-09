@@ -1,4 +1,5 @@
 {
+  "deployment-methods": "Deployment Methods",
   "github-actions": "GitHub Actions",
   "ecs": "Amazon ECS",
   "freestyle": "Freestyle",
