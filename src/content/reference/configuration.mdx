@@ -30,6 +30,7 @@ dns:
 proxy:
   http_listen: ":80"
   https_listen: ":443"
+  tunnel_listen: ":1080"
   max_request_body_bytes: 1048576
   max_response_body_bytes: 0
 
@@ -62,6 +63,7 @@ transforms:
           proxy_value: "proxy-openai-abc123"
           match_headers: ["Authorization"]
           match_body: false
+          require: true
           hosts:
             - name: "api.openai.com"
 
@@ -116,6 +118,7 @@ Configures the HTTP/HTTPS proxy listeners.
 |---|---|---|---|
 | `http_listen` | string | `":80"` | Address and port for HTTP traffic. |
 | `https_listen` | string | `":443"` | Address and port for HTTPS traffic. |
+| `tunnel_listen` | string | (disabled) | Address and port for the CONNECT/SOCKS5 tunnel listener. Accepts both HTTP CONNECT and SOCKS5 requests. See the [SOCKS5 and CONNECT tunnels guide](/guides/socks5-connect) for details. |
 | `max_request_body_bytes` | integer | `1048576` (1 MiB) | Maximum request body size that the proxy will buffer. Bodies are only buffered when a transform needs to inspect them. |
 | `max_response_body_bytes` | integer | `0` (unlimited) | Maximum response body size that the proxy will buffer. Set to `0` to disable the limit. |
 
@@ -177,6 +180,7 @@ Swaps proxy tokens for real secret values at the egress boundary. Real secrets a
 | `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
 | `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
 | `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
+| `require` | boolean | `false` | When `true`, requests matching a configured host are rejected with HTTP 403 if the proxy token is not present. Prevents workloads from bypassing secret swapping by using their own credentials. |
 | `hosts` | object[] | `[]` | Restrict secret swapping to specific destinations. If empty, the swap applies to all destinations. See below. |
 
 #### `secrets.secrets[].hosts[]`

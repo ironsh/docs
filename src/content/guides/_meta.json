@@ -3,5 +3,6 @@
   "ecs": "Amazon ECS",
   "freestyle": "Freestyle",
   "daytona": "Daytona",
+  "socks5-connect": "SOCKS5 and CONNECT Tunnels",
   "otel-export": "Exporting Logs to OTEL"
 }
