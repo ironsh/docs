@@ -1,0 +1,87 @@
+---
+title: SOCKS5 and CONNECT Tunnels
+description: "Route traffic through iron-proxy using SOCKS5 or HTTP CONNECT instead of DNS interception."
+---
+
+import { Callout } from "nextra/components";
+
+# SOCKS5 and CONNECT Tunnels
+
+iron-proxy can accept traffic via SOCKS5 and HTTP CONNECT tunnel requests in addition to its standard DNS-based interception. This is useful when you cannot control DNS resolution but can configure a proxy address: for example, applications that support `HTTPS_PROXY`/`ALL_PROXY` environment variables, or tools with built-in SOCKS5 support.
+
+## How It Works
+
+The tunnel listener accepts both HTTP CONNECT and SOCKS5 protocols on a single port. iron-proxy peeks at the first byte of each connection to determine the protocol, then:
+
+1. Resolves the target through the existing transform pipeline (allowlists and secret transforms still apply).
+2. MITM's TLS connections using the configured CA, just like the standard HTTPS listener.
+3. Passes plain HTTP traffic directly.
+4. Rejects non-HTTP/TLS protocols.
+
+This means your allowlist, secret swapping, and audit logging all work the same way regardless of whether traffic arrives via DNS interception or the tunnel listener.
+
+<Callout type="info">
+The tunnel listener only supports HTTP and TLS traffic. Non-HTTP protocols (e.g., raw TCP, SSH) are rejected.
+</Callout>
+
+## Configuration
+
+Enable the tunnel listener by adding `tunnel_listen` to the `proxy` block in your iron-proxy config:
+
+```yaml
+proxy:
+  http_listen: ":80"
+  https_listen: ":443"
+  tunnel_listen: ":1080"
+```
+
+The listener is disabled by default. Set `tunnel_listen` to a bind address and port to enable it. Port `1080` is the conventional SOCKS5 port, but any port works.
+
+See the [configuration reference](/reference/configuration#proxy) for the full list of proxy options.
+
+## Connecting via SOCKS5
+
+Point your application at the tunnel listener using the `ALL_PROXY` or `HTTPS_PROXY` environment variable:
+
+```bash
+export ALL_PROXY=socks5://iron-proxy-host:1080
+curl https://api.example.com
+```
+
+Most HTTP clients and CLI tools respect these variables. Some tools have their own proxy settings:
+
+```bash
+# Git
+git config --global http.proxy socks5://iron-proxy-host:1080
+
+# wget
+wget --proxy=on -e use_proxy=yes -e all_proxy=socks5://iron-proxy-host:1080 https://api.example.com
+```
+
+## Connecting via HTTP CONNECT
+
+HTTP CONNECT is the standard method used by `HTTPS_PROXY`. Most HTTP libraries and tools support it natively:
+
+```bash
+export HTTPS_PROXY=http://iron-proxy-host:1080
+curl https://api.example.com
+```
+
+Both `HTTPS_PROXY` and `HTTP_PROXY` work. The tunnel listener handles both protocols on the same port.
+
+## When to Use Tunnel Mode
+
+**Use DNS interception** (the default) when you control the network stack and can point DNS at iron-proxy. This is the simplest setup and requires no per-application configuration.
+
+**Use tunnel mode** when:
+
+- You cannot control DNS resolution (e.g., managed platforms, shared infrastructure).
+- Applications already have proxy configuration built in.
+- You want to avoid TLS trust issues by letting the application negotiate TLS directly through the tunnel.
+- You are running tools that respect standard proxy environment variables but are hard to configure for custom DNS.
+
+You can run both at the same time. DNS interception and the tunnel listener are independent: enable one, the other, or both depending on your deployment.
+
+## CA Certificates
+
+The tunnel listener MITM's TLS connections using the same CA as the standard HTTPS listener. Workloads connecting through the tunnel still need to trust iron-proxy's CA certificate. See [CA Certificates](/reference/ca-certificates) for setup instructions.
