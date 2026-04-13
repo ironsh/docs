@@ -3,24 +3,20 @@ title: Freestyle Integration
 description: "Run iron-proxy inside Freestyle VMs using pre-baked snapshots for fast, repeatable egress control."
 ---
 
-import { Callout, Steps } from "nextra/components";
+import { Steps } from "nextra/components";
 
 # Freestyle Integration
 
 This guide walks through running iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You will create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
 
-<Callout type="warning">
-Freestyle VMs do not include the iptables `owner` match module (`xt_owner`), so egress control is limited to DNS-based interception only. See [Egress Control Limitations](#egress-control-limitations) for details.
-</Callout>
-
 ## How It Works
 
 The setup has two phases:
 
-1. **Snapshot creation:** A one-time script builds a Freestyle VM that installs iron-proxy, generates a CA certificate, trusts it system-wide, and configures DNS to resolve through the proxy. Freestyle snapshots the result.
-2. **VM launch:** New VMs boot from the snapshot with iron-proxy already running. DNS queries resolve through iron-proxy, which checks them against your allowlist and terminates TLS using per-domain leaf certificates.
+1. **Snapshot creation:** A one-time script builds a Freestyle VM that installs iron-proxy, generates a CA certificate, trusts it system-wide, configures DNS to resolve through the proxy, and sets up iptables rules to force all traffic through the proxy. Freestyle snapshots the result.
+2. **VM launch:** New VMs boot from the snapshot with iron-proxy already running. DNS queries resolve through iron-proxy, which checks them against your allowlist and terminates TLS using per-domain leaf certificates. iptables rules prevent workloads from bypassing the proxy.
 
-Because iron-proxy owns DNS inside the VM, all domain-based traffic flows through the proxy automatically. There is no need for per-process configuration or custom environment variables.
+Because iron-proxy owns DNS inside the VM and iptables blocks direct outbound connections from non-root processes, all traffic flows through the proxy automatically. There is no need for per-process configuration or custom environment variables.
 
 ## Prerequisites
 
@@ -35,7 +31,7 @@ Because iron-proxy owns DNS inside the VM, all domain-based traffic flows throug
 ### Install the Freestyle SDK
 
 ```bash
-npm install freestyle-sandboxes
+npm install freestyle
 ```
 
 ### Create the Snapshot Script
@@ -43,7 +39,7 @@ npm install freestyle-sandboxes
 Save this as `create-snapshot.mjs`. It builds a Debian VM, installs iron-proxy, generates a trusted CA, and snapshots the result.
 
 ```javascript
-import { freestyle, VmSpec, VmBaseImage } from "freestyle-sandboxes";
+import { freestyle, VmSpec, VmBaseImage } from "freestyle";
 
 const IRON_PROXY_VERSION = process.env.IRON_PROXY_VERSION || "latest";
 
@@ -63,12 +59,17 @@ transforms:
   - name: allowlist
     config:
       warn: false
-      domains: []
+      domains:
+        - "api.github.com"
+        - "github.com"
+        - "objects.githubusercontent.com"
+        - "httpbin.org"
 log:
   level: "info"
 `.trimStart();
 
-// Oneshot script: download iron-proxy, generate CA, trust CA, stop systemd-resolved
+// Oneshot script: download iron-proxy, generate CA, trust CA, stop systemd-resolved,
+// create unprivileged user, set up iptables
 const installScript = `#!/bin/bash
 set -euo pipefail
 
@@ -108,11 +109,27 @@ systemctl disable systemd-resolved || true
 
 # Route DNS through the proxy
 echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+# Create an unprivileged user for running workloads.
+# This is required: iptables rules below allow outbound traffic from root
+# (which iron-proxy runs as) and reject everything else. If workloads run
+# as root, they can bypass the proxy entirely.
+useradd -m -s /bin/bash workload
+
+# Set up iptables rules to force traffic through the proxy.
+# - Allow all loopback traffic (needed for proxy communication).
+# - Allow outbound traffic from root (iron-proxy runs as root).
+# - Allow established/related connections (return traffic for accepted connections).
+# - Reject everything else: non-root processes cannot reach the network directly.
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -m owner --uid-owner root -j ACCEPT
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 `;
 
 async function main() {
   const baseImage = new VmBaseImage("FROM debian:trixie-slim").runCommands(
-    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates openssl jq"
+    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates openssl jq iptables sudo"
   );
 
   const spec = new VmSpec()
@@ -174,9 +191,11 @@ A few things to note about this script:
 - **`dns.proxy_ip`** is set to `127.0.0.1` because iron-proxy runs inside the same VM as your workloads.
 - **`dns.upstream_resolver`** uses `8.8.8.8:53`. Change this if your network requires a different upstream resolver.
 - **`warn: false`** means non-allowlisted requests are blocked immediately. Set to `true` while building your allowlist.
-- **`domains: []`** starts with an empty allowlist. Add the domains your workloads need before creating the snapshot.
+- **`domains`** includes GitHub (needed for the install script to download iron-proxy) and `httpbin.org` for testing. Replace these with the domains your workloads need before creating the snapshot.
 - The install script disables `systemd-resolved` and points `/etc/resolv.conf` at `127.0.0.1` so all DNS goes through iron-proxy.
 - The CA is trusted system-wide via `update-ca-certificates`.
+- A `workload` user is created for running untrusted code. This is required because the iptables rules allow outbound traffic from root. If workloads run as root, they can bypass the proxy.
+- The iptables rules allow loopback and root-owned traffic, then reject everything else. This forces all non-root outbound traffic through the proxy.
 
 ### Bootstrap the Snapshot
 
@@ -217,15 +236,15 @@ Save the snapshot ID. You will use it to launch new VMs.
 Use the snapshot ID to create ephemeral VMs with iron-proxy already running:
 
 ```javascript
-import { freestyle } from "freestyle-sandboxes";
+import { freestyle } from "freestyle";
 
 const { vm } = await freestyle.vms.create({
   snapshotId: "sc-abc123...",
   persistence: { type: "ephemeral" },
 });
 
-// Traffic is already routed through iron-proxy
-const result = await vm.exec("curl -s https://httpbin.org/get");
+// Run commands as the unprivileged workload user
+const result = await vm.exec("sudo -u workload curl -s https://httpbin.org/get");
 console.log(result.stdout);
 
 await vm.stop();
@@ -269,13 +288,36 @@ To update an existing deployment, re-run `create-snapshot.mjs` to produce a new 
 
 For the full set of configuration options, see the [configuration reference](/reference/configuration).
 
-## Egress Control Limitations
+## Egress Control With iptables
 
-Normally, you would use iptables to block all outbound traffic except from iron-proxy. This requires the `xt_owner` kernel module, which provides the `--uid-owner` match: it lets you write rules that allow traffic from a specific user (e.g., root, which iron-proxy runs as) while rejecting everything else. Freestyle VMs do not include `xt_owner`, so there is no straightforward way to distinguish traffic from iron-proxy vs. traffic from other processes. Any rule that blocks outbound connections would also block the proxy from reaching upstream servers.
+The snapshot script sets up iptables rules that force all outbound traffic through iron-proxy. This uses the `xt_owner` kernel module, which provides the `--uid-owner` match: it allows traffic from root (which iron-proxy runs as) while rejecting everything else. The rules are:
 
-Without iptables enforcement, iron-proxy's egress control on Freestyle relies entirely on DNS interception: `/etc/resolv.conf` points at iron-proxy, which resolves domains to its own address and terminates TLS. If a process hardcodes an IP address or uses its own DNS resolver, that traffic will bypass the proxy.
+```bash
+# Allow all loopback traffic (workloads talk to iron-proxy on 127.0.0.1)
+iptables -A OUTPUT -o lo -j ACCEPT
 
-In practice, this covers most workloads. Few applications connect to raw IP addresses. However, if you need to enforce strict egress control against adversarial code, you should use a platform that provides kernel-level egress control, or use [Freestyle's built-in network permissions](#freestyles-built-in-egress-control).
+# Allow outbound traffic from root (iron-proxy runs as root)
+iptables -A OUTPUT -m owner --uid-owner root -j ACCEPT
+
+# Allow return traffic for established connections
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Reject everything else
+iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
+```
+
+These rules mean that non-root processes cannot reach the network directly. Even if a workload hardcodes an IP address or uses its own DNS resolver, the traffic is rejected at the kernel level.
+
+### Running Workloads as an Unprivileged User
+
+The iptables rules allow all traffic from root, so workloads **must** run as a non-root user to prevent circumvention. The snapshot script creates a `workload` user for this purpose. Run all untrusted code as this user:
+
+```javascript
+// Run commands as the unprivileged workload user
+const result = await vm.exec("sudo -u workload your-command-here");
+```
+
+If a workload runs as root, it can bypass the proxy entirely: its traffic matches the `--uid-owner root` rule and goes straight to the internet. Always ensure untrusted code runs under the `workload` user or another non-root account.
 
 ### Freestyle's Built-In Egress Control
 
