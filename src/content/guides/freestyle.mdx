@@ -59,7 +59,11 @@ transforms:
   - name: allowlist
     config:
       warn: false
-      domains: []
+      domains:
+        - "api.github.com"
+        - "github.com"
+        - "objects.githubusercontent.com"
+        - "httpbin.org"
 log:
   level: "info"
 `.trimStart();
@@ -125,7 +129,7 @@ iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 
 async function main() {
   const baseImage = new VmBaseImage("FROM debian:trixie-slim").runCommands(
-    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates openssl jq iptables"
+    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates openssl jq iptables sudo"
   );
 
   const spec = new VmSpec()
@@ -187,7 +191,7 @@ A few things to note about this script:
 - **`dns.proxy_ip`** is set to `127.0.0.1` because iron-proxy runs inside the same VM as your workloads.
 - **`dns.upstream_resolver`** uses `8.8.8.8:53`. Change this if your network requires a different upstream resolver.
 - **`warn: false`** means non-allowlisted requests are blocked immediately. Set to `true` while building your allowlist.
-- **`domains: []`** starts with an empty allowlist. Add the domains your workloads need before creating the snapshot.
+- **`domains`** includes GitHub (needed for the install script to download iron-proxy) and `httpbin.org` for testing. Replace these with the domains your workloads need before creating the snapshot.
 - The install script disables `systemd-resolved` and points `/etc/resolv.conf` at `127.0.0.1` so all DNS goes through iron-proxy.
 - The CA is trusted system-wide via `update-ca-certificates`.
 - A `workload` user is created for running untrusted code. This is required because the iptables rules allow outbound traffic from root. If workloads run as root, they can bypass the proxy.
@@ -240,7 +244,7 @@ const { vm } = await freestyle.vms.create({
 });
 
 // Run commands as the unprivileged workload user
-const result = await vm.exec("su - workload -c 'curl -s https://httpbin.org/get'");
+const result = await vm.exec("sudo -u workload curl -s https://httpbin.org/get");
 console.log(result.stdout);
 
 await vm.stop();
@@ -310,7 +314,7 @@ The iptables rules allow all traffic from root, so workloads **must** run as a n
 
 ```javascript
 // Run commands as the unprivileged workload user
-const result = await vm.exec("su - workload -c 'your-command-here'");
+const result = await vm.exec("sudo -u workload your-command-here");
 ```
 
 If a workload runs as root, it can bypass the proxy entirely: its traffic matches the `--uid-owner root` rule and goes straight to the internet. Always ensure untrusted code runs under the `workload` user or another non-root account.
