@@ -196,21 +196,26 @@ transforms:
   # forwarding upstream.
   - name: secrets
     config:
-      source: env # read secrets from environment variables
       secrets:
-        - var: OPENAI_API_KEY           # env var on the proxy container
-          proxy_value: "proxy-openai-abc123" # token the client sends
-          match_headers: ["Authorization"]   # only scan this header
-          match_body: false
-          hosts:
-            - name: "httpbin.org"
+        - source: env
+          config:
+            var: OPENAI_API_KEY           # env var on the proxy container
+          replace:
+            proxy_value: "proxy-openai-abc123" # token the client sends
+            match_headers: ["Authorization"]   # only scan this header
+            match_body: false
+          rules:
+            - host: "httpbin.org"
 
-        - var: INTERNAL_TOKEN
-          proxy_value: "proxy-internal-tok"
-          match_headers: []  # empty list = scan all headers
-          match_body: false
-          hosts:
-            - name: "httpbin.org"
+        - source: env
+          config:
+            var: INTERNAL_TOKEN
+          replace:
+            proxy_value: "proxy-internal-tok"
+            match_headers: []  # empty list = scan all headers
+            match_body: false
+          rules:
+            - host: "httpbin.org"
 
 log:
   level: "info"
