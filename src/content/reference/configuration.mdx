@@ -57,15 +57,37 @@ transforms:
 
   - name: secrets
     config:
-      source: env
       secrets:
-        - var: OPENAI_API_KEY
-          proxy_value: "proxy-openai-abc123"
-          match_headers: ["Authorization"]
-          match_body: false
+        - source: env
+          config:
+            var: OPENAI_API_KEY
+          inject:
+            header: "Authorization"
+            formatter: "Bearer {{ .Value }}"
           require: true
-          hosts:
-            - name: "api.openai.com"
+          rules:
+            - host: "api.openai.com"
+              methods: ["POST"]
+              paths: ["/v1/*"]
+        - source: aws_sm
+          config:
+            secret_id: "arn:aws:secretsmanager:us-west-1:123456789:secret:anthropic-key"
+            region: "us-west-1"
+            ttl: 5m
+          replace:
+            proxy_value: "pk-proxy-anthropic-xyz"
+            match_headers: ["x-api-key"]
+          rules:
+            - host: "api.anthropic.com"
+
+  - name: annotate
+    config:
+      annotations:
+        - rules:
+            - host: "api.openai.com"
+              methods: ["POST"]
+              paths: ["/v1/*"]
+          headers: ["x-request-id"]
 
   - name: grpc
     config:
@@ -160,37 +182,127 @@ Each rule matches a single host or CIDR, with optional method and path filters. 
 |---|---|---|---|
 | `host` | string | | Hostname glob pattern. Mutually exclusive with `cidr`. |
 | `cidr` | string | | CIDR range. Mutually exclusive with `host`. |
-| `methods` | string[] | all | HTTP methods to allow (e.g., `["GET", "POST"]`). Omit to allow all methods. |
+| `methods` | string[] | all | HTTP methods to allow (e.g., `["GET", "POST"]`). Omit or set to `["*"]` to allow all methods. |
 | `paths` | string[] | all | Path patterns to allow (e.g., `["/v1/*"]`). Must start with `/`. Supports `*` wildcards. Omit to allow all paths. |
 
 ### `secrets`
 
-Swaps proxy tokens for real secret values at the egress boundary. Real secrets are never exposed to the sandboxed environment. Query parameters are always scanned for proxy tokens.
+Injects or replaces secret values at the egress boundary so that real credentials are never exposed to sandboxed workloads. Each secret declares its own source and either an `inject` or `replace` block.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `source` | string | **required** | Where to read secret values from. Currently only `env` (environment variables) is supported. |
-| `secrets` | object[] | `[]` | List of secret mappings. See below. |
+| `secrets` | object[] | `[]` | List of secret entries. See below. |
 
 #### `secrets.secrets[]`
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `var` | string | **required** | Environment variable name containing the real secret value. |
-| `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
-| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
-| `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
-| `require` | boolean | `false` | When `true`, requests matching a configured host are rejected with HTTP 403 if the proxy token is not present. Prevents workloads from bypassing secret swapping by using their own credentials. |
-| `hosts` | object[] | `[]` | Restrict secret swapping to specific destinations. If empty, the swap applies to all destinations. See below. |
+| `source` | string | **required** | Where to read the secret value. One of `env` (environment variable) or `aws_sm` (AWS Secrets Manager). |
+| `config` | object | **required** | Source-specific configuration. See [`env` config](#env-source) and [`aws_sm` config](#aws_sm-source) below. |
+| `inject` | object | | Inject the secret onto matching requests unconditionally. See [inject mode](#inject-mode). Mutually exclusive with `replace`. |
+| `replace` | object | | Replace a proxy token with the real value. See [replace mode](#replace-mode). Mutually exclusive with `inject`. |
+| `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present (replace mode) or if the target header/query param is already set by the client (inject mode). Prevents workloads from bypassing secret management. |
+| `rules` | object[] | `[]` | Restrict this secret to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). If empty, the secret applies to all destinations. |
 
-#### `secrets.secrets[].hosts[]`
+#### `env` Source
 
-Each host entry can specify a hostname pattern or a CIDR range, but not both.
+Read the secret from an environment variable on the iron-proxy process.
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Hostname or glob pattern to match (e.g., `api.openai.com`). |
-| `cidr` | string | CIDR range to match (e.g., `10.0.0.0/8`). |
+| `var` | string | Environment variable name containing the real secret value. |
+
+```yaml
+source: env
+config:
+  var: OPENAI_API_KEY
+```
+
+#### `aws_sm` Source
+
+Read the secret from AWS Secrets Manager. The value is cached and refreshed lazily based on the configured TTL.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `secret_id` | string | **required** | Secret ARN or name in AWS Secrets Manager. |
+| `region` | string | **required** | AWS region where the secret is stored. |
+| `ttl` | duration | `5m` | How long to cache the secret value before refreshing from Secrets Manager. |
+
+```yaml
+source: aws_sm
+config:
+  secret_id: "arn:aws:secretsmanager:us-west-1:123456789:secret:my-key"
+  region: "us-west-1"
+  ttl: 10m
+```
+
+#### Inject Mode
+
+In inject mode, the proxy unconditionally sets a header or query parameter on every request that matches the secret's rules. The workload never sees or sends any credential. This is useful when sandboxed workloads should have no knowledge of credentials at all.
+
+| Field | Type | Description |
+|---|---|---|
+| `header` | string | Header name to set on matching requests. Mutually exclusive with `query_param`. |
+| `query_param` | string | Query parameter name to set on matching requests. Mutually exclusive with `header`. |
+| `formatter` | string | Go template for the header value. Receives `.Value` (the resolved secret) and a `base64` helper. Not used with `query_param`. |
+
+The `formatter` field supports Go templates. Use `{{ .Value }}` to insert the raw secret. The `base64` helper concatenates and base64-encodes its arguments:
+
+```yaml
+# Set Authorization: Bearer <secret>
+inject:
+  header: "Authorization"
+  formatter: "Bearer {{ .Value }}"
+
+# Set a query parameter (no formatter needed)
+inject:
+  query_param: "key"
+```
+
+#### Replace Mode
+
+In replace mode, the workload sends a proxy token that the proxy swaps for the real value before forwarding upstream. Query parameters are always scanned for proxy tokens.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
+| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
+| `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
+
+### `annotate`
+
+Captures HTTP request header values into audit log annotations based on host, method, and path rules. This is useful for enriching audit logs with request-specific context like request IDs or authorization tokens. This transform never rejects requests.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `annotations` | object[] | `[]` | List of annotation groups. See below. |
+
+#### `annotate.annotations[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `rules` | object[] | Rules to match requests against. Uses the same format as [`allowlist.rules[]`](#allowlistrules). |
+| `headers` | string[] | Header names to capture from matching requests. Values are written as `header:<Name>` entries in the transform trace. |
+
+```yaml
+- name: annotate
+  config:
+    annotations:
+      - rules:
+          - host: "api.openai.com"
+            methods: ["POST"]
+            paths: ["/v1/*"]
+        headers: ["x-request-id", "authorization"]
+```
+
+Example audit log annotation output:
+
+```json
+{
+  "header:X-Request-Id": "req-abc123",
+  "header:Authorization": "Bearer sk-ant-..."
+}
+```
 
 ### `grpc`
 

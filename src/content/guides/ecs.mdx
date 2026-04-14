@@ -406,7 +406,28 @@ For more details, see the [CA certificate reference](/reference/ca-certificate).
 
 ## Secrets
 
-If your iron-proxy config includes secrets (e.g. API keys for upstream services), you can inject them as environment variables using [AWS Secrets Manager](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data-secrets.html). Add a `secrets` block to the iron-proxy container definition:
+iron-proxy can source secrets directly from AWS Secrets Manager using the `aws_sm` source type. This avoids needing to pass secrets through ECS environment variables:
+
+```yaml
+transforms:
+  - name: secrets
+    config:
+      secrets:
+        - source: aws_sm
+          config:
+            secret_id: "arn:aws:secretsmanager:YOUR_REGION:YOUR_ACCOUNT_ID:secret:my-api-key"
+            region: "YOUR_REGION"
+            ttl: 5m
+          replace:
+            proxy_value: "pk-proxy-xxx"
+            match_headers: ["Authorization"]
+          rules:
+            - host: "api.example.com"
+```
+
+The `ttl` field controls how long iron-proxy caches the secret value before refreshing from Secrets Manager. The task role (`ironProxyTaskRole`) needs `secretsmanager:GetSecretValue` permission on the secret ARN.
+
+You can also use the `env` source with [ECS Secrets Manager integration](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data-secrets.html) to inject secrets as environment variables at task launch:
 
 ```json
 "secrets": [
@@ -417,7 +438,7 @@ If your iron-proxy config includes secrets (e.g. API keys for upstream services)
 ]
 ```
 
-ECS pulls the secret value at task launch and exposes it as an environment variable in the container. Don't forget to add a corresponding `secrets` entry in your `iron-proxy.yaml` so the proxy knows to read it. See the [configuration reference](/reference/configuration#secrets) for details.
+See the [configuration reference](/reference/configuration#secrets) for the full secrets configuration format.
 
 ## Troubleshooting
 
