@@ -1,5 +1,6 @@
 {
   "deployment-methods": "Deployment Methods",
   "configuration": "Configuration",
+  "secret-proxying": "Secret Proxying",
   "ca-certificates": "CA Certificates"
 }
