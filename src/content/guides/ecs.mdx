@@ -413,11 +413,11 @@ transforms:
   - name: secrets
     config:
       secrets:
-        - source: aws_sm
-          config:
+        - source:
+            type: aws_sm
             secret_id: "arn:aws:secretsmanager:YOUR_REGION:YOUR_ACCOUNT_ID:secret:my-api-key"
             region: "YOUR_REGION"
-            ttl: 5m
+            ttl: 15m
           replace:
             proxy_value: "pk-proxy-xxx"
             match_headers: ["Authorization"]

@@ -197,8 +197,8 @@ transforms:
   - name: secrets
     config:
       secrets:
-        - source: env
-          config:
+        - source:
+            type: env
             var: OPENAI_API_KEY           # env var on the proxy container
           replace:
             proxy_value: "proxy-openai-abc123" # token the client sends
@@ -207,8 +207,8 @@ transforms:
           rules:
             - host: "httpbin.org"
 
-        - source: env
-          config:
+        - source:
+            type: env
             var: INTERNAL_TOKEN
           replace:
             proxy_value: "proxy-internal-tok"
