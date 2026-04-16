@@ -35,6 +35,7 @@ proxy:
   max_response_body_bytes: 0
 
 tls:
+  mode: "mitm"
   ca_cert: "/certs/ca.crt"
   ca_key: "/certs/ca.key"
   cert_cache_size: 1000
@@ -58,27 +59,37 @@ transforms:
   - name: secrets
     config:
       secrets:
-        - source: env
-          config:
+        - source:
+            type: env
             var: OPENAI_API_KEY
           inject:
             header: "Authorization"
             formatter: "Bearer {{ .Value }}"
-          require: true
           rules:
             - host: "api.openai.com"
               methods: ["POST"]
               paths: ["/v1/*"]
-        - source: aws_sm
-          config:
+        - source:
+            type: aws_sm
             secret_id: "arn:aws:secretsmanager:us-west-1:123456789:secret:anthropic-key"
             region: "us-west-1"
             ttl: 5m
           replace:
             proxy_value: "pk-proxy-anthropic-xyz"
             match_headers: ["x-api-key"]
+            require: true
           rules:
             - host: "api.anthropic.com"
+        - source:
+            type: aws_ssm
+            name: "/myapp/openai-key"
+            region: "us-east-1"
+            ttl: 15m
+          replace:
+            proxy_value: "pk-proxy-openai-param"
+            match_headers: ["Authorization"]
+          rules:
+            - host: "api.openai.com"
 
   - name: annotate
     config:
@@ -146,14 +157,28 @@ Configures the HTTP/HTTPS proxy listeners.
 
 ## `tls`
 
-Configures TLS interception. iron-proxy uses the provided CA certificate to mint leaf certificates on the fly for each upstream host.
+Configures how iron-proxy handles HTTPS traffic. Two modes are supported: `mitm` (the default), which terminates TLS using a CA you provide and mints leaf certificates on the fly, and `sni-only`, which passes TLS through without termination.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `ca_cert` | string | **required** | Path to the CA certificate file (PEM format). |
-| `ca_key` | string | **required** | Path to the CA private key file (PEM format). |
-| `cert_cache_size` | integer | `1000` | Number of generated leaf certificates to keep in the LRU cache. |
-| `leaf_cert_expiry_hours` | integer | `72` | Validity duration (in hours) for generated leaf certificates. |
+| `mode` | string | `"mitm"` | TLS handling mode. One of `mitm` or `sni-only`. See [TLS modes](#tls-modes) below. |
+| `ca_cert` | string | required for `mitm` | Path to the CA certificate file (PEM format). Not used in `sni-only` mode. |
+| `ca_key` | string | required for `mitm` | Path to the CA private key file (PEM format). Not used in `sni-only` mode. |
+| `cert_cache_size` | integer | `1000` | Number of generated leaf certificates to keep in the LRU cache. Not used in `sni-only` mode. |
+| `leaf_cert_expiry_hours` | integer | `72` | Validity duration (in hours) for generated leaf certificates. Not used in `sni-only` mode. |
+
+### TLS Modes
+
+**`mitm`** (default): iron-proxy terminates the client TLS connection, inspects the decrypted request, and opens a new TLS connection to the upstream server. Clients must trust iron-proxy's CA certificate. This is the only mode that lets transforms see request methods, paths, headers, and bodies.
+
+**`sni-only`**: iron-proxy peeks at the TLS ClientHello SNI and TCP-passthroughs the connection to the upstream without terminating TLS. Clients do not need to trust a proxy CA. The transform pipeline still runs with a host-only synthetic request: method, path, headers, and body are empty, so host-based allowlist rules are the only things that can match. Body-inspecting transforms like `secrets` and `grpc` still run but have nothing to act on. The CONNECT/SOCKS5 tunnel's TLS branch also switches to passthrough in `sni-only` mode.
+
+```yaml
+tls:
+  mode: "sni-only"
+```
+
+Use `sni-only` when you need host-level egress control but cannot distribute a CA certificate to workloads. Use `mitm` when you need secret injection, body inspection, or method/path allowlists.
 
 ## `transforms`
 
@@ -197,44 +222,71 @@ Injects or replaces secret values at the egress boundary so that real credential
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `source` | string | **required** | Where to read the secret value. One of `env` (environment variable) or `aws_sm` (AWS Secrets Manager). |
-| `config` | object | **required** | Source-specific configuration. See [`env` config](#env-source) and [`aws_sm` config](#aws_sm-source) below. |
+| `source` | object | **required** | Where to read the secret value. Contains a `type` field (`env`, `aws_sm`, or `aws_ssm`) plus type-specific fields. See [sources](#secret-sources) below. |
 | `inject` | object | | Inject the secret onto matching requests unconditionally. See [inject mode](#inject-mode). Mutually exclusive with `replace`. |
 | `replace` | object | | Replace a proxy token with the real value. See [replace mode](#replace-mode). Mutually exclusive with `inject`. |
-| `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present (replace mode) or if the target header/query param is already set by the client (inject mode). Prevents workloads from bypassing secret management. |
 | `rules` | object[] | `[]` | Restrict this secret to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). If empty, the secret applies to all destinations. |
 
-#### `env` Source
+#### Secret Sources
+
+##### `env`
 
 Read the secret from an environment variable on the iron-proxy process.
 
 | Field | Type | Description |
 |---|---|---|
+| `type` | string | Must be `env`. |
 | `var` | string | Environment variable name containing the real secret value. |
 
 ```yaml
-source: env
-config:
+source:
+  type: env
   var: OPENAI_API_KEY
 ```
 
-#### `aws_sm` Source
+##### `aws_sm`
 
-Read the secret from AWS Secrets Manager. The value is cached and refreshed lazily based on the configured TTL.
+Read the secret from AWS Secrets Manager. The value is cached and refreshed in the background based on the configured TTL.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
+| `type` | string | | Must be `aws_sm`. |
 | `secret_id` | string | **required** | Secret ARN or name in AWS Secrets Manager. |
-| `region` | string | **required** | AWS region where the secret is stored. |
-| `ttl` | duration | `5m` | How long to cache the secret value before refreshing from Secrets Manager. |
+| `region` | string | AWS SDK default | AWS region where the secret is stored. |
+| `json_key` | string | | When set, parse the fetched value as JSON and extract this field. |
+| `ttl` | duration | `0` (no refresh) | Re-fetch interval. Set to `0` to read the value once at startup. |
 
 ```yaml
-source: aws_sm
-config:
+source:
+  type: aws_sm
   secret_id: "arn:aws:secretsmanager:us-west-1:123456789:secret:my-key"
   region: "us-west-1"
   ttl: 10m
 ```
+
+##### `aws_ssm`
+
+Read the secret from AWS Systems Manager Parameter Store. Like `aws_sm`, values are cached and refreshed in the background based on the TTL.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | | Must be `aws_ssm`. |
+| `name` | string | **required** | Parameter name or ARN. |
+| `region` | string | AWS SDK default | AWS region where the parameter is stored. |
+| `with_decryption` | boolean | `true` | Decrypt `SecureString` parameters. |
+| `json_key` | string | | When set, parse the fetched value as JSON and extract this field. |
+| `ttl` | duration | `0` (no refresh) | Re-fetch interval. Set to `0` to read the value once at startup. |
+
+```yaml
+source:
+  type: aws_ssm
+  name: "/myapp/api-key"
+  region: "us-east-1"
+  with_decryption: true
+  ttl: 15m
+```
+
+iron-proxy uses the standard AWS credential chain (environment variables, instance profile, ECS task role, etc.) to authenticate with AWS.
 
 #### Inject Mode
 
@@ -268,6 +320,9 @@ In replace mode, the workload sends a proxy token that the proxy swaps for the r
 | `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
 | `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
 | `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
+| `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present in any scanned location. Prevents workloads from bypassing secret management. |
+
+The `proxy_value`, `match_headers`, `match_body`, and `require` fields may also be set at the top level of a secret entry for backwards compatibility. New configurations should use the `replace` block.
 
 ### `annotate`
 

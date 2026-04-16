@@ -7,6 +7,8 @@ description: "Reference for generating, configuring, and trusting the CA certifi
 
 iron-proxy intercepts TLS traffic by acting as a man-in-the-middle: it terminates the client's TLS connection, inspects or transforms the request, then opens a new TLS connection to the upstream server. To do this, it needs a CA certificate and private key to mint leaf certificates on the fly for each upstream host.
 
+This page applies to the default TLS mode (`mitm`). If you only need host-level egress control and cannot distribute a CA certificate to workloads, iron-proxy also supports an [SNI-only mode](/reference/configuration#tls-modes) that passes TLS through without termination and needs no CA.
+
 ## Generating a CA Certificate
 
 Generate the CA in two steps: first create a private key, then issue a self-signed certificate with the proper X.509 extensions.
