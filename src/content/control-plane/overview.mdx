@@ -1,0 +1,32 @@
+---
+title: "Overview"
+description: "Centralized policy, audit, and fleet management for iron-proxy. Hosted or self-hosted."
+---
+
+# Overview
+
+A single iron-proxy is a default-deny firewall for one workload. A fleet of them is a distributed system, and distributed systems need a control plane. The iron-proxy control plane is that layer.
+
+Policies are authored once and converge across every connected proxy in seconds. New proxies enroll on boot with a short-lived token and pull their config on first connect. There is nothing baked into the image and nothing to template per host. Every intercepted request from every proxy streams into a unified audit store you can query by workload, destination, policy decision, or injected secret.
+
+## What You Get
+
+**Policy as the source of truth.** Allowlists, secret mappings, and transform rules live in the control plane and are versioned there. Proxies are stateless clients; rebuild a host and it pulls the current policy on reconnect. There is no per-host YAML to drift.
+
+**Live updates, no restarts.** Publish a policy change and every connected proxy applies it within seconds. Tightening an allowlist mid-incident or rotating a secret mapping is a single API call, not a fleet-wide redeploy.
+
+**Zero-config enrollment.** A proxy starts with `IRON_BOOTSTRAP_TOKEN=…` and nothing else. Tokens are short-lived and single-use by default, so the same image safely boots in CI, in a sandbox, or in a long-lived VM. See [Enrollment](./enrollment) for the token model.
+
+**Fleet-wide audit search.** Every request across every proxy lands in one queryable store, indexed by host, workload tag, destination, decision, and the secrets that were proxied in. No per-host log shipping, no Loki cluster to operate.
+
+## Flexible Deployment
+
+The control plane is available as a hosted cloud service and as an on-prem, self-hosted instance. Both run the same software and expose the same API, UI, and proxy protocol, so moving between them is a config change rather than a rewrite.
+
+**Hosted** is the fastest path to a working fleet. You enroll proxies against a tenant endpoint and get policy management, live updates, enrollment, and audit search without operating anything yourself. Best for teams that want a production-ready control plane in minutes and do not have data-residency or network-isolation requirements.
+
+**Self-hosted** runs entirely inside your own infrastructure, with source available. Policy data and audit logs stay on your network, and the deployment can be fully air-gapped. Best for regulated environments, on-prem-only networks, or any setting where a managed service is not an option.
+
+## Next Steps
+
+The fastest way to see the control plane in action is a live walkthrough. [Book a demo](https://cal.com/matt-slipper-ironsh/15min) and we'll show you policy authoring, live updates, enrollment, and audit search against a real fleet.

@@ -1,0 +1,102 @@
+---
+title: "Enrollment"
+description: "Connect an iron-proxy instance to the control plane using a bootstrap token."
+---
+
+import { Steps } from "nextra/components";
+
+# Enrollment
+
+A new iron-proxy joins the control plane by running a one-time `init` command with a bootstrap token. The proxy registers itself, claims a set of tags, pulls its initial configuration, and begins reporting audit events. After enrollment, the proxy stores a long-lived credential on disk and does not need the bootstrap token again.
+
+## Enroll a Proxy
+
+<Steps>
+
+### Create a Bootstrap Key
+
+In the control plane UI, open the **Proxies** tab and click **Add Proxy**.
+
+<img src="/images/control-plane-add-proxy.png" alt="The Add Proxy dialog, showing Tags, Key Expiry, and Max Uses fields" style={{ marginTop: "1rem" }} />
+
+Fill in:
+
+- **Tags.** Labels that will be assigned to any proxy registered with this key. Type a tag and press comma or enter to add it.
+- **Key Expiry.** How long the key can be redeemed before it is no longer valid.
+- **Max Uses.** How many proxies this key can register. `0` means unlimited.
+
+Click **Add Proxy**. The control plane displays the bootstrap token once.
+
+<img src="/images/control-plane-bootstrap-token.png" alt="Success message showing the bootstrap token with its tags and expiry" style={{ marginTop: "1rem" }} />
+
+Copy the token immediately. It will not be shown again.
+
+### Run `init` on the Host
+
+On the machine where iron-proxy will run, execute:
+
+```bash
+sudo ./iron-proxy init \
+  -bootstrap-token 1a46ef8a2f34650f6b3fba5f20990dde0910060d9faab3dfba9ab168cf4f3f43 \
+  -tags dev,foo
+```
+
+The `init` subcommand exchanges the bootstrap token for a long-lived proxy credential, registers the proxy with the control plane, claims the requested tags, pulls the initial policy, installs the iron-proxy systemd services, and starts the `iron-proxy` service. When it returns, the proxy is already running and connected to the control plane.
+
+`sudo` is required because the state directory, iptables rules, and systemd units are all system-wide.
+
+### Verify It Registered
+
+Back in the **Proxies** tab, the new proxy appears in the list with its tags and `Active` status.
+
+<img src="/images/control-plane-proxies-list.png" alt="The Proxies list showing the newly enrolled proxy with its tags and status" style={{ marginTop: "1rem" }} />
+
+</Steps>
+
+## Customizing the Generated Config
+
+`init` writes a config file to the proxy's state directory. It is preconfigured to connect to the control plane and apply the policy you just pulled, and will work as-is for most deployments.
+
+Anything in the standard [iron-proxy configuration](/reference/configuration) can be edited directly in the file: listen ports, upstream resolvers, log format, extra transforms. After editing, restart the service to pick up the changes:
+
+```bash
+sudo systemctl restart iron-proxy
+```
+
+Control-plane-managed fields (policy, secret mappings, tags) are refreshed from the control plane on every reconnect, so local edits to those fields will be overwritten. Edit them in the control plane UI instead.
+
+## Tags
+
+Tags are colon-separated labels that identify a proxy and its workload. They can be bare strings like `dev` or namespaced like `env:prod`. Every audit event is indexed by the proxy's tags, so fleet-wide queries like "show every request from `env:prod` `service:checkout`" are cheap.
+
+Pass tags as a comma-separated list:
+
+```
+-tags env:prod,service:checkout,region:us-east-1
+```
+
+Changing a proxy's tags after enrollment is not yet exposed in the UI or CLI. For now, re-enroll the proxy with a fresh bootstrap token to assign a new tag set.
+
+### Tag Claims Are Bounded by the Key
+
+The `-tags` list on the host must be a subset of the tags configured on the bootstrap key. Claiming a tag that was not on the key fails enrollment, and the server enforces this regardless of what the host requests.
+
+This lets you issue narrowly scoped keys per environment. A key whose tag set is `dev, foo` cannot be abused to enroll a proxy claiming `prod`, no matter what the host passes on the command line.
+
+## Bootstrap Tokens
+
+Bootstrap tokens are short-lived credentials that authorize enrollment. They exist only for the handshake. Once the proxy has its long-lived credential, the token is discarded.
+
+`Max Uses` controls how many proxies a single token can register:
+
+- **1** is the tightest setting: the token can enroll exactly one proxy, then is dead. Prefer this for provisioning flows that hand out a token per host.
+- **A small integer** fits short-lived autoscaling groups where a handful of proxies will come up from the same bootstrap.
+- **0** (unlimited) fits base images or long-lived pools. Pair with a short `Key Expiry` so the blast radius of a leaked token stays bounded.
+
+## Troubleshooting
+
+**Token expired.** The key's `Key Expiry` window has passed. Generate a new bootstrap key and retry.
+
+**Tag not in allowed set.** The proxy requested a tag that was not on the bootstrap key. Check the key's tag set in the control plane UI.
+
+**Max uses exceeded.** The bootstrap key has already been redeemed `Max Uses` times. Generate a new key or increase `Max Uses` on the next one.
