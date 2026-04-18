@@ -1,0 +1,63 @@
+---
+title: "Policies"
+description: "Create named egress allowlists and apply them to proxies by tag."
+---
+
+import { Steps } from "nextra/components";
+
+# Policies
+
+A policy is a named allowlist that tells matching proxies which hosts, paths, and methods they can reach. Policies are authored in the control plane UI and delivered to every proxy whose tags match the policy's match set. Changes propagate within seconds of saving, without restarts.
+
+Proxies are default-deny. Anything not covered by an active, matching policy is rejected.
+
+## Create a Policy
+
+<Steps>
+
+### Fill Out Policy Metadata
+
+In the control plane UI, open the **Policies** tab and click **Add Policy**.
+
+<img src="/images/control-plane-new-policy.png" alt="The New Policy form with Name, Priority, Status, and Match Tags fields" style={{ marginTop: "1rem" }} />
+
+Fill in:
+
+- **Name.** A human-readable identifier like `production-egress` or `ci-npm`.
+- **Priority.** An integer used to break ties when a single proxy matches more than one policy. Lower numbers win. Defaults to `10`.
+- **Status.** Set to `Active` to apply the policy to matching proxies. Any other status is a no-op, so you can draft a policy in the UI and hold it until ready.
+- **Match Tags.** The tags a proxy must carry for the policy to apply to it. Type a tag and press comma or enter to add it. Leave empty to apply the policy to every proxy in the fleet.
+
+### Add Egress Rules
+
+Each rule describes a class of requests the policy allows. Click **Add Rule** once per rule.
+
+<img src="/images/control-plane-egress-rules.png" alt="An egress rule with Host, Paths, and Methods fields" style={{ marginTop: "1rem" }} />
+
+Each rule has:
+
+- **Host** (required). A hostname or glob. `api.example.com` matches that host exactly. `*.example.com` matches any subdomain.
+- **Paths.** Zero or more path patterns. Leave empty to allow any path on the host. Add multiple paths by pressing comma or enter between entries.
+- **Methods.** The HTTP methods the rule accepts. Check **All** for every method, or pick a subset.
+
+Rules inside a policy are OR-combined: a request is allowed if it matches any rule in the policy.
+
+### Save
+
+Save the policy. Every connected proxy with a matching tag set applies the change within seconds. Denied requests show up in the audit trail immediately.
+
+</Steps>
+
+## Match Tags
+
+Match tags are how a policy is pinned to a subset of the fleet. A proxy is subject to a policy when it carries every tag in the policy's match set. A proxy can be matched by multiple policies at once, and their allowed rules combine.
+
+Because tags are assigned at [enrollment](./enrollment), you can roll out a new policy without touching its match set: enroll hosts with the right tag and they inherit the policy automatically.
+
+## Priority
+
+Priority only matters when two matching policies disagree about the same host and method. In that case, the policy with the lower priority number wins, so `priority: 1` beats `priority: 10`. Most fleets don't need priority tuning: start with the default and adjust only if you see policies stepping on each other.
+
+## Rolling Out Safely
+
+Match tags make it cheap to canary a policy. Tag a single proxy with something like `canary:true`, point the new policy at `canary:true`, and watch the audit trail for denies before broadening the match set to include production tags. Audit search filtered by `decision: denied` shows exactly which requests the new policy would block.
