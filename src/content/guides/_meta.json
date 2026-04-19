@@ -1,6 +1,7 @@
 {
   "github-actions": "GitHub Actions",
   "ecs": "Amazon ECS",
+  "kubernetes": "Kubernetes",
   "freestyle": "Freestyle",
   "daytona": "Daytona",
   "socks5-connect": "SOCKS5 and CONNECT Tunnels",
