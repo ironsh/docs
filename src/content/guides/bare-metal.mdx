@@ -1,0 +1,284 @@
+---
+title: Bare Metal Integration
+description: "Install iron-proxy on a Linux host, run the init command, tune the generated config, then use iptables to transparently redirect all HTTP and HTTPS traffic through the proxy."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Bare Metal Integration
+
+This guide walks through running iron-proxy directly on a Linux host: a physical server, a cloud VM, or any other machine where you control the network stack. This is the [embedded in a VM or sandbox](/reference/deployment-methods#embedded-in-a-vm-or-sandbox) deployment pattern.
+
+## How It Works
+
+iron-proxy runs as root under systemd, while workloads run as an unprivileged user. Two sets of iptables rules work together to redirect outbound HTTP and HTTPS from non-root processes to iron-proxy's local listeners on ports 8080 and 8443, while preventing workloads from connecting to arbitrary IPs or non-standard ports directly.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Linux host                                               │
+│                                                          │
+│  ┌────────────────┐         ┌──────────────────────┐     │
+│  │ workload       │         │ iron-proxy (root)    │     │
+│  │ (uid: app)     │         │                      │     │
+│  │                │  nat    │  :8080  HTTP         │     │
+│  │ connects to ───┼─REDIRECT│  :8443  HTTPS MITM   │     │
+│  │ host:443       │────────►│  allowlist           │     │
+│  │ (no proxy set) │         │  secret transforms   │     │
+│  └────────────────┘         └──────────┬───────────┘     │
+│                                        │                 │
+│  iptables filter: DROP unless uid=root │                 │
+│                                        ▼                 │
+│                                    internet              │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Prerequisites
+
+- A Linux host with systemd and iptables. Debian, Ubuntu, RHEL, Amazon Linux, and similar distributions all work.
+- Root access on the host.
+- A dedicated non-root user for your workload (this guide uses `app`). If one does not already exist, create it with `sudo useradd -m app`.
+- Kernel support for the `xt_owner` iptables module. This is enabled by default on every mainstream distribution; you can verify with `iptables -m owner --help`.
+
+## Setup
+
+<Steps>
+
+### Install The Binary
+
+```bash
+curl -fsSL https://iron.sh/install.sh | sh
+```
+
+To install manually, download the release tarball from the [GitHub releases page](https://github.com/ironsh/iron-proxy/releases), verify the checksums, and copy the binary to `/usr/local/bin/iron-proxy`.
+
+Confirm the install:
+
+```bash
+iron-proxy version
+```
+
+### Run iron-proxy init
+
+`iron-proxy init` generates a 90-day CA, writes a default config, installs a systemd unit, and starts the service.
+
+```bash
+sudo iron-proxy init -allow "api.openai.com,api.anthropic.com"
+```
+
+It produces:
+
+| Path | Purpose |
+| --- | --- |
+| `/etc/iron-proxy/ca.crt` | CA certificate used to sign per-domain leaves |
+| `/etc/iron-proxy/ca.key` | CA private key. Never copy this off the host |
+| `/etc/iron-proxy/proxy.yaml` | Generated config |
+| `/etc/systemd/system/iron-proxy.service` | Systemd unit |
+| `/var/log/iron-proxy.log` | Structured JSON audit log |
+
+Check that the service is running:
+
+```bash
+sudo systemctl status iron-proxy
+```
+
+Send a test request through the tunnel listener to confirm the proxy is working before applying the iptables rules:
+
+```bash
+curl --cacert /etc/iron-proxy/ca.crt \
+  --proxy http://127.0.0.1:1080 \
+  https://api.openai.com/v1/models
+```
+
+An allowed host returns normally. Anything not in the allowlist returns `403`.
+
+<Callout type="warning">
+`ca.key` signs every leaf certificate workloads on this host will trust. Keep it off backups that leave the machine and rotate if it is ever exposed. See the [CA certificate reference](/reference/ca-certificates) for rotation guidance.
+</Callout>
+
+### Edit The Config
+
+Open `/etc/iron-proxy/proxy.yaml`. The generated file looks like this:
+
+```yaml
+proxy:
+  http_listen: ":8080"
+  https_listen: ":8443"
+  tunnel_listen: ":1080"
+
+dns:
+  listen: ":8053"
+  proxy_ip: "127.0.0.1"
+
+tls:
+  ca_cert: "/etc/iron-proxy/ca.crt"
+  ca_key: "/etc/iron-proxy/ca.key"
+
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "api.openai.com"
+        - "api.anthropic.com"
+
+log:
+  level: "info"
+```
+
+**Expand the allowlist.** Add every domain your workloads need. Wildcards are supported. Start in warn mode while you are discovering domains:
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      warn: true
+      domains:
+        - "api.openai.com"
+        - "api.anthropic.com"
+        - "*.githubusercontent.com"
+```
+
+`warn: true` logs denied requests without blocking them. Remove it to switch to enforce mode.
+
+**Inject upstream secrets.** Keep the real API key on the host and give workloads a placeholder. iron-proxy swaps the placeholder for the real value before forwarding, scoped to the domains you specify:
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "api.openai.com"
+
+  - name: secrets
+    config:
+      secrets:
+        - source:
+            type: env
+            var: OPENAI_API_KEY
+          proxy_value: "proxy-openai-token"
+          match_headers: ["Authorization"]
+          require: true
+          rules:
+            - host: "api.openai.com"
+```
+
+Set `OPENAI_API_KEY` in the systemd unit so the proxy can see it but workloads cannot:
+
+```bash
+sudo systemctl edit iron-proxy
+```
+
+```ini
+[Service]
+Environment=OPENAI_API_KEY=sk-real-key-here
+```
+
+See the [secret proxying reference](/reference/secret-proxying) for the full set of source, match, and rule options.
+
+Apply config changes by restarting the service:
+
+```bash
+sudo systemctl restart iron-proxy
+```
+
+### Trust The CA System-Wide
+
+Install the CA into the system trust store so every TLS library on the host trusts iron-proxy's leaf certificates:
+
+**Debian or Ubuntu:**
+
+```bash
+sudo cp /etc/iron-proxy/ca.crt /usr/local/share/ca-certificates/iron-proxy.crt
+sudo update-ca-certificates
+```
+
+**RHEL, CentOS, or Amazon Linux:**
+
+```bash
+sudo cp /etc/iron-proxy/ca.crt /etc/pki/ca-trust/source/anchors/iron-proxy.crt
+sudo update-ca-trust
+```
+
+Some runtimes use their own trust bundle. Node.js uses `NODE_EXTRA_CA_CERTS`, Python `requests` uses `REQUESTS_CA_BUNDLE`. See the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+
+</Steps>
+
+## Routing Workload Traffic
+
+You have two options for directing workload connections through iron-proxy: transparent redirects, or a CONNECT proxy. Transparent redirect is recommended since it requires no changes in workloads and covers all HTTP and HTTPS connections automatically. The CONNECT proxy is an alternative that workloads opt into explicitly.
+
+### Transparent Redirect
+
+iptables intercepts outbound HTTP and HTTPS from non-root processes and redirects them to iron-proxy's local listeners. Workloads make ordinary connections with no proxy configuration required.
+
+**Redirect ports 80 and 443** to the proxy's listeners:
+
+```bash
+sudo iptables -t nat -A OUTPUT ! -o lo -p tcp --dport 80 \
+  -m owner ! --uid-owner root -j REDIRECT --to-ports 8080
+sudo iptables -t nat -A OUTPUT ! -o lo -p tcp --dport 443 \
+  -m owner ! --uid-owner root -j REDIRECT --to-ports 8443
+```
+
+**Lock down direct egress:**
+
+```bash
+sudo iptables -A OUTPUT -o lo -j ACCEPT
+sudo iptables -A OUTPUT -m owner --uid-owner root -j ACCEPT
+sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
+```
+
+What each filter rule does:
+
+1. **Loopback.** The REDIRECT rules forward non-root port 80/443 traffic to `127.0.0.1`. This rule allows those packets to reach iron-proxy.
+2. **Root egress.** iron-proxy runs as root, so its outbound packets are allowed through. Any other root process (`apt`, `curl` as root, etc.) also passes.
+3. **Established connections.** Allows return traffic for connections iron-proxy itself opened.
+4. **Default reject.** All other non-root outbound traffic is rejected with an ICMP error.
+
+<Callout type="warning">
+This setup depends on workloads running as a non-root user. A workload running as root matches rule 2 and bypasses the proxy entirely. Untrusted code must run under `app` or another unprivileged account without sudo access.
+</Callout>
+
+**Persist the rules** so they survive a reboot:
+
+**Debian or Ubuntu:**
+
+```bash
+sudo apt-get install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+**RHEL, CentOS, or Amazon Linux:**
+
+```bash
+sudo yum install -y iptables-services
+sudo service iptables save
+sudo systemctl enable iptables
+```
+
+#### Verify
+
+```bash
+# Allowlisted host: iptables redirects to proxy, proxy forwards — expect 200
+sudo -u app curl --max-time 5 https://api.openai.com/v1/models
+
+# Blocked host: iptables redirects to proxy, proxy returns 403
+sudo -u app curl --max-time 5 https://example.com
+
+# Non-80/443 port: hits the filter REJECT rule — expect ICMP error
+sudo -u app curl --max-time 5 https://example.com:8080
+```
+
+### CONNECT Proxy
+
+Workloads can also connect through iron-proxy explicitly using the `HTTPS_PROXY` environment variable. iron-proxy listens for CONNECT and SOCKS5 tunnel requests on port `1080`.
+
+Set these in the workload user's shell profile or the systemd unit that runs the workload:
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:1080
+export HTTP_PROXY=http://127.0.0.1:1080
+export NO_PROXY=127.0.0.1,localhost
+```
+
+Most HTTP clients and language SDKs respect these variables. The [SOCKS5 and CONNECT tunnels guide](/guides/socks5-connect) covers per-tool variants.
