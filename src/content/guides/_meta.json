@@ -1,4 +1,5 @@
 {
+  "bare-metal": "Bare Metal",
   "github-actions": "GitHub Actions",
   "ecs": "Amazon ECS",
   "kubernetes": "Kubernetes",
