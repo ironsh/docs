@@ -116,6 +116,22 @@ transforms:
         cert: "/etc/iron-proxy/grpc-client.pem"
         key: "/etc/iron-proxy/grpc-client-key.pem"
 
+  - name: judge
+    config:
+      name: "github-write-guard"
+      fallback: "deny"
+      timeout: "8s"
+      rules:
+        - host: "api.github.com"
+          methods: ["POST", "PATCH", "DELETE", "PUT"]
+      provider:
+        type: "anthropic"
+        model: "claude-haiku-4-5-20251001"
+        api_key_env: "ANTHROPIC_API_KEY"
+      prompt: |
+        Allow writes to the repository under review. Deny writes to user
+        settings, billing, or any other repository.
+
 metrics:
   listen: ":9090"
 
@@ -380,6 +396,103 @@ Delegates request and response processing to an external gRPC server implementin
 | `ca_cert` | string | system default | Path to a custom CA certificate for server verification. |
 | `cert` | string | | Path to a client certificate for mTLS. Must be set together with `key`. |
 | `key` | string | | Path to the client private key for mTLS. Must be set together with `cert`. |
+
+### `judge`
+
+Calls a large language model to produce an allow or deny decision for outbound requests that match the instance's rules. Each `judge` entry is an independent instance with its own natural-language policy, LLM backend, semaphore, and circuit breaker. See the [LLM Judge reference](/reference/llm-judge) for a full overview, including writing policies, pipeline ordering, and envelope limits.
+
+The judge can only reject. It never approves a request that the static allowlist would have denied.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | **required** | Identifier for this instance, used in audit logs. Must be unique across judge instances. |
+| `prompt` | string | **required** | Natural-language policy sent to the LLM. Describes what is allowed and what is not. |
+| `rules` | object[] | **required** | Destinations this judge applies to. Uses the same format as [`allowlist.rules[]`](#allowlistrules). At least one rule is required. |
+| `provider` | object | **required** | LLM backend configuration. See [providers](#judge-providers) below. |
+| `fallback` | string | `"deny"` | Behavior when the LLM call fails, times out, returns malformed output, or the circuit breaker is open. One of `deny` (reject with HTTP 403) or `skip` (continue to the next transform). |
+| `timeout` | duration | `"8s"` | Maximum time for a single LLM call. |
+| `max_concurrent` | integer | `100` | Maximum concurrent in-flight LLM calls for this instance. Additional requests wait for a slot. |
+| `circuit_breaker` | object | | Consecutive-failure breaker settings. See below. |
+
+#### `judge.circuit_breaker`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `consecutive_failures` | integer | `5` | Number of consecutive failures that trips the breaker open. |
+| `cooldown` | duration | `"10s"` | How long the breaker stays open before admitting a single probe call. |
+
+#### Judge Providers
+
+The `provider` block selects and configures the LLM backend. The `type` field discriminates the shape of the block. Two providers are supported: `anthropic` and `openai`.
+
+##### `anthropic`
+
+Calls the Anthropic Messages API.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | | Must be `anthropic`. |
+| `model` | string | **required** | Anthropic model ID (e.g., `claude-haiku-4-5-20251001`). |
+| `api_key_env` | string | **required** | Environment variable holding the Anthropic API key. |
+| `base_url` | string | `https://api.anthropic.com` | Override the API base URL. |
+| `max_tokens` | integer | `256` | Maximum tokens in the model response. |
+
+```yaml
+provider:
+  type: "anthropic"
+  model: "claude-haiku-4-5-20251001"
+  api_key_env: "ANTHROPIC_API_KEY"
+  max_tokens: 256
+```
+
+##### `openai`
+
+Calls the OpenAI Chat Completions API.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | | Must be `openai`. |
+| `model` | string | **required** | OpenAI model ID (e.g., `gpt-5.4-nano`). |
+| `api_key_env` | string | **required** | Environment variable holding the OpenAI API key. |
+| `base_url` | string | `https://api.openai.com` | Override the API base URL. Useful for Azure OpenAI or gateway deployments. |
+| `max_tokens` | integer | `256` | Maximum tokens in the model response. Sent as `max_completion_tokens`. |
+
+```yaml
+provider:
+  type: "openai"
+  model: "gpt-5.4-nano"
+  api_key_env: "OPENAI_API_KEY"
+  max_tokens: 256
+```
+
+#### Full Judge Example
+
+```yaml
+- name: judge
+  config:
+    name: "github-write-guard"
+    fallback: "deny"
+    timeout: "8s"
+    max_concurrent: 100
+    circuit_breaker:
+      consecutive_failures: 5
+      cooldown: "10s"
+    rules:
+      - host: "api.github.com"
+        methods: ["POST", "PATCH", "DELETE", "PUT"]
+    provider:
+      type: "anthropic"
+      model: "claude-haiku-4-5-20251001"
+      api_key_env: "ANTHROPIC_API_KEY"
+      max_tokens: 256
+    prompt: |
+      This agent performs code review on the repository under review.
+      Allow writes to the comments and reviews endpoints of the specific
+      repository under review. Deny writes to user settings, organization
+      management, billing, or any repository the agent is not reviewing.
+```
+
+Place the `judge` transform before the `secrets` transform so the LLM provider sees proxy tokens rather than real credentials. See [pipeline ordering](/reference/llm-judge#pipeline-ordering) for details.
 
 ## `metrics`
 
