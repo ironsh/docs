@@ -1,0 +1,241 @@
+---
+title: "LLM Judge"
+description: "How iron-proxy uses an LLM to produce allow/deny decisions on outbound requests based on a natural-language policy."
+---
+
+import { Callout } from "nextra/components";
+
+# LLM Judge
+
+The `judge` transform calls a large language model to produce an allow or deny decision for outbound HTTP requests. Each judge instance carries its own natural-language policy, LLM backend, and URL rules. You can deploy zero, one, or many judges with different prompts scoped to different destinations.
+
+The judge is configured as a [transform](/reference/configuration#judge) in your iron-proxy YAML config.
+
+## How It Works
+
+Each judge instance runs in the transform pipeline with its own state:
+
+1. **Rule matching**: when a request matches the instance's `rules`, the judge runs. Non-matching requests pass through untouched, with no LLM call and no annotations.
+2. **Envelope construction**: the request is serialized into a JSON envelope (method, URL, headers, body) with per-field size caps and priority ordering for security-relevant headers.
+3. **LLM call**: the envelope is sent to the configured provider along with a system prompt that embeds the operator's policy. The system prompt instructs the model to return a bare JSON decision.
+4. **Decision**: the model returns `{"decision":"ALLOW", ...}` or `{"decision":"DENY", ...}`. A deny short-circuits the pipeline with HTTP 403. An allow continues to the next transform.
+5. **Fallback**: on LLM error, timeout, malformed output, or open circuit breaker, the configured `fallback` applies (see [Failure Handling](#failure-handling)).
+
+## Invariants
+
+The judge is an additional rejection layer. It cannot override iron-proxy's other controls:
+
+- **The judge can only reject**. It never approves a request that the static allowlist would have denied. The allowlist's deny always wins.
+- **Non-matching requests are ignored**. If a request does not match the instance's `rules`, no LLM call is made and no audit annotations are written.
+- **Default-deny semantics are preserved**. If an instance skips on failure, the rest of the pipeline still applies, and unmatched requests are still blocked by the allowlist.
+
+## Pipeline Ordering
+
+The relative position of the `judge` and `secrets` transforms in your configuration determines what the LLM provider sees.
+
+<Callout type="info">
+**Recommended: place the judge before the secrets transform.** The LLM provider sees proxy tokens, never the real credentials the workload has access to. This is the safer default and is the only placement compatible with typical threat models.
+</Callout>
+
+```yaml
+transforms:
+  - name: allowlist
+    config: {...}
+
+  - name: judge       # runs first: LLM sees proxy tokens only
+    config: {...}
+
+  - name: secrets     # real credentials injected here
+    config: {...}
+```
+
+**Alternative: place the judge after secrets.** The judge evaluates the exact wire form that will egress, including any injected credentials. Only choose this if your threat model accepts sending real secrets to the LLM provider.
+
+## Configuration
+
+A judge instance is a single entry under `transforms:`. See the [configuration reference](/reference/configuration#judge) for the full schema.
+
+```yaml
+transforms:
+  - name: judge
+    config:
+      name: "github-write-guard"
+      fallback: "deny"
+      timeout: "8s"
+      max_concurrent: 100
+      circuit_breaker:
+        consecutive_failures: 5
+        cooldown: "10s"
+      rules:
+        - host: "api.github.com"
+          methods: ["POST", "PATCH", "DELETE", "PUT"]
+      provider:
+        type: "anthropic"
+        model: "claude-haiku-4-5-20251001"
+        api_key_env: "ANTHROPIC_API_KEY"
+        max_tokens: 256
+      prompt: |
+        This agent performs code review on the repository under review.
+        Allow writes to the comments and reviews endpoints of the specific
+        repository under review. Deny writes to user settings, organization
+        management, billing, or any repository the agent is not reviewing.
+```
+
+### Writing a Good Policy
+
+The `prompt` field is a natural-language description of what is allowed. A few guidelines:
+
+- **Keep it short and specific.** A focused policy produces more consistent decisions than a long one. Aim for a paragraph or two.
+- **Scope the judge's rules to the smallest set of destinations the policy covers.** A judge whose policy only mentions GitHub should have rules that only match GitHub. Everything else should be handled by the static allowlist or other judges.
+- **State both what is allowed and what is not.** Positive and negative examples help the model resolve ambiguity.
+- **Default to deny in the policy itself.** If the policy leaves a case undefined, the system prompt instructs the model to prefer DENY, but being explicit reduces guesswork.
+
+The operator policy is JSON-escaped before being embedded in the system prompt, so quotes, braces, and newlines in your policy are safe. Prompt-injection-shaped text inside the policy is treated as data, not instructions.
+
+## Providers
+
+The judge supports two LLM backends. Both use Anthropic's or OpenAI's public APIs and expect an API key supplied via an environment variable on the iron-proxy process.
+
+### Anthropic (`type: anthropic`)
+
+Calls the Messages API at `https://api.anthropic.com/v1/messages`.
+
+```yaml
+provider:
+  type: "anthropic"
+  model: "claude-haiku-4-5-20251001"
+  api_key_env: "ANTHROPIC_API_KEY"
+  max_tokens: 256
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | **required** | Must be `anthropic`. |
+| `model` | string | **required** | Anthropic model ID (e.g., `claude-haiku-4-5-20251001`). |
+| `api_key_env` | string | **required** | Name of the environment variable holding the Anthropic API key. |
+| `base_url` | string | `https://api.anthropic.com` | Override the API base URL. Useful for testing or gateway deployments. |
+| `max_tokens` | integer | `256` | Maximum tokens in the model response. |
+
+### OpenAI (`type: openai`)
+
+Calls the Chat Completions API at `https://api.openai.com/v1/chat/completions`.
+
+```yaml
+provider:
+  type: "openai"
+  model: "gpt-5.4-nano"
+  api_key_env: "OPENAI_API_KEY"
+  max_tokens: 256
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | **required** | Must be `openai`. |
+| `model` | string | **required** | OpenAI model ID (e.g., `gpt-5.4-nano`). |
+| `api_key_env` | string | **required** | Name of the environment variable holding the OpenAI API key. |
+| `base_url` | string | `https://api.openai.com` | Override the API base URL. Useful for Azure OpenAI or gateway deployments. |
+| `max_tokens` | integer | `256` | Maximum tokens in the model response. Sent as `max_completion_tokens`. |
+
+## Failure Handling
+
+Every judge instance has its own timeout, semaphore, and circuit breaker. A failing judge never blocks an unrelated judge.
+
+### Timeout
+
+The `timeout` field bounds a single LLM call. On timeout, the call is canceled and the configured fallback applies.
+
+### Concurrency
+
+The `max_concurrent` field caps the number of in-flight LLM calls for this instance. Additional requests wait for a slot. This protects the proxy from runaway concurrency against a slow LLM endpoint.
+
+### Circuit Breaker
+
+Each instance has an independent consecutive-failure breaker:
+
+- After `consecutive_failures` errors in a row, the breaker opens and short-circuits subsequent calls for `cooldown`. During this window, the fallback applies without an LLM call.
+- After the cooldown elapses, the breaker enters a half-open state and admits a single probe call. Success closes the breaker; failure reopens it with a fresh cooldown.
+- A single successful call resets the failure counter, so transient errors do not slowly accumulate.
+
+### Fallback
+
+The `fallback` field determines what happens when the LLM call fails or returns something unusable. Two modes are supported:
+
+- **`deny`** (default, recommended for production): the request is rejected with HTTP 403. Safe under any failure mode.
+- **`skip`**: the judge yields to the rest of the pipeline. Since iron-proxy is default-deny, unmatched requests are still blocked, but requests that the static allowlist would accept will no longer be gated by this judge.
+
+A fallback fires on:
+
+- LLM request error (network, 4xx, 5xx).
+- LLM call timeout.
+- Circuit breaker open.
+- Malformed model output (not valid JSON, or `decision` not `ALLOW`/`DENY`).
+- Errors reading the request body or building the envelope.
+
+The `allow` fallback does not exist: the judge cannot upgrade a failure into a successful allow. Pick `deny` when the judge is a hard gate and `skip` only when the judge is advisory and the underlying allowlist already enforces safety.
+
+## Envelope Limits
+
+Before the request is sent to the LLM, it is serialized into a JSON envelope with per-field size caps. Content beyond the cap is dropped and a warning is added so the model can see that truncation happened. The model is instructed to prefer DENY when truncation warnings could plausibly matter.
+
+| Field | Cap | Notes |
+|---|---|---|
+| Body | 16 KiB | Non-UTF-8 bodies are omitted entirely with a warning. Multipart bodies beyond the cap emit a placeholder summary. |
+| URL | 2 KiB | Truncated with a warning showing the original length. |
+| Headers (total) | 4 KiB | Security-relevant headers (`Host`, `Origin`, `Referer`, `X-Forwarded-For`, `X-Forwarded-Host`, `Content-Type`, `Content-Length`, `Content-Encoding`, `Transfer-Encoding`, `Authorization`, `Cookie`) are emitted first, then the rest in alphabetical order. |
+| Header value | 512 bytes | Values longer than this are truncated with a marker noting the original length. |
+
+The priority-header ordering defeats header-inflation attacks: even when an attacker packs the envelope with junk headers, the security-relevant ones are always visible to the model.
+
+## Audit Output
+
+Every matched request adds structured fields under the transform trace:
+
+| Field | Description |
+|---|---|
+| `judge.instance` | The instance `name`. Use this to disambiguate between multiple judges. |
+| `judge.model` | The model ID used for the decision. |
+| `judge.decision` | `ALLOW`, `DENY`, `FALLBACK_ALLOW`, or `FALLBACK_DENY`. |
+| `judge.reason` | Short justification. For successful calls, comes from the model. For fallbacks, describes the failure. Capped at 512 characters. |
+| `judge.duration_ms` | Total time spent in the judge, in milliseconds, including the LLM call. |
+| `judge.input_tokens` | Tokens the provider billed for the prompt. Present only when the LLM call succeeded. |
+| `judge.output_tokens` | Tokens the provider billed for the response. Present only when the LLM call succeeded. |
+| `judge.fallback_applied` | Present only when a fallback fired. One of `deny` or `skip`. |
+| `judge.circuit_breaker_tripped` | Present and set to `true` only when the breaker was open. |
+| `judge.raw_output` | Present only when decision parsing failed. Contains the first 2 KiB of the raw model output for debugging. |
+
+## Multiple Instances
+
+You can define many judge transforms in a single configuration. Each entry is an independent instance: its own `name`, `prompt`, `rules`, provider, semaphore, and circuit breaker. A failing or slow judge does not affect the others.
+
+```yaml
+transforms:
+  - name: judge
+    config:
+      name: "github-write-guard"
+      rules:
+        - host: "api.github.com"
+          methods: ["POST", "PATCH", "DELETE", "PUT"]
+      provider:
+        type: "anthropic"
+        model: "claude-haiku-4-5-20251001"
+        api_key_env: "ANTHROPIC_API_KEY"
+      prompt: |
+        Allow writes to the repository under review. Deny writes to user
+        settings, billing, or any other repository.
+
+  - name: judge
+    config:
+      name: "slack-dm-guard"
+      rules:
+        - host: "slack.com"
+          paths: ["/api/chat.postMessage"]
+      provider:
+        type: "openai"
+        model: "gpt-5.4-nano"
+        api_key_env: "OPENAI_API_KEY"
+      prompt: |
+        Allow posts to the #release-bot channel. Deny posts to any other
+        channel or direct messages.
+```
+
+A single request may match at most one judge per instance, and each matched instance runs independently. If two instances both match, both make an LLM call and both must allow.
