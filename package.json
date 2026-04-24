@@ -7,7 +7,7 @@
     "dev": "next --port 4000",
     "build": "next build",
     "start": "next start",
-    "postbuild": "pagefind --site .next/server/app --output-path public/_pagefind",
+    "postbuild": "pagefind --site .next/server/app --output-path public/_pagefind && next-sitemap",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
@@ -23,6 +23,7 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "next-sitemap": "^4.2.3",
     "pagefind": "^1.4.0",
     "wrangler": "^4.53.0"
   }
