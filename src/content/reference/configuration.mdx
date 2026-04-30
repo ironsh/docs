@@ -268,7 +268,7 @@ Injects or replaces secret values at the egress boundary so that real credential
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `source` | object | **required** | Where to read the secret value. Contains a `type` field (`env`, `aws_sm`, or `aws_ssm`) plus type-specific fields. See [sources](#secret-sources) below. |
+| `source` | object | **required** | Where to read the secret value. Contains a `type` field (`env`, `aws_sm`, `aws_ssm`, or `1password`) plus type-specific fields. See [sources](#secret-sources) below. |
 | `inject` | object | | Inject the secret onto matching requests unconditionally. See [inject mode](#inject-mode). Mutually exclusive with `replace`. |
 | `replace` | object | | Replace a proxy token with the real value. See [replace mode](#replace-mode). Mutually exclusive with `inject`. |
 | `rules` | object[] | `[]` | Restrict this secret to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). If empty, the secret applies to all destinations. |
@@ -333,6 +333,25 @@ source:
 ```
 
 iron-proxy uses the standard AWS credential chain (environment variables, instance profile, ECS task role, etc.) to authenticate with AWS.
+
+##### `1password`
+
+Read the secret from 1Password using a service account token. Like the AWS sources, values are cached and refreshed in the background based on the TTL.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | | Must be `1password`. |
+| `secret_ref` | string | **required** | 1Password reference using the `op://vault/item/[section/]field` syntax. |
+| `token_env` | string | `OP_SERVICE_ACCOUNT_TOKEN` | Environment variable holding the 1Password service account token. |
+| `ttl` | duration | `0` (no refresh) | Re-fetch interval. Set to `0` to read the value once at startup. |
+
+```yaml
+source:
+  type: 1password
+  secret_ref: "op://Engineering/OpenAI/credential"
+  token_env: OP_SERVICE_ACCOUNT_TOKEN
+  ttl: 15m
+```
 
 #### Inject Mode
 
