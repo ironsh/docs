@@ -15,7 +15,7 @@ Policies are authored once and converge across every connected proxy in seconds.
 
 **Live updates, no restarts.** Publish a policy change and every connected proxy applies it within seconds. Tightening an allowlist mid-incident or rotating a secret mapping is a single API call, not a fleet-wide redeploy.
 
-**Zero-config enrollment.** A proxy starts with `IRON_BOOTSTRAP_TOKEN=…` and nothing else. Tokens are short-lived and single-use by default, so the same image safely boots in CI, in a sandbox, or in a long-lived VM. See [Enrollment](./enrollment) for the token model.
+**Zero-config enrollment.** A proxy starts with `IRON_ENROLLMENT_TOKEN=…` and nothing else. Tokens are short-lived and single-use by default, so the same image safely boots in CI, in a sandbox, or in a long-lived VM. See [Enrollment](./enrollment) for the token model.
 
 **Fleet-wide audit search.** Every request across every proxy lands in one queryable store, indexed by host, workload tag, destination, decision, and the secrets that were proxied in. No per-host log shipping, no Loki cluster to operate.
 

@@ -33,6 +33,12 @@ proxy:
   tunnel_listen: ":1080"
   max_request_body_bytes: 1048576
   max_response_body_bytes: 0
+  upstream_response_header_timeout: "30s"
+  upstream_deny_cidrs:
+    - "169.254.169.254/32"
+    - "fd00:ec2::254/128"
+    - "127.0.0.0/8"
+    - "::1/128"
 
 tls:
   mode: "mitm"
@@ -170,6 +176,30 @@ Configures the HTTP/HTTPS proxy listeners.
 | `tunnel_listen` | string | (disabled) | Address and port for the CONNECT/SOCKS5 tunnel listener. Accepts both HTTP CONNECT and SOCKS5 requests. See the [SOCKS5 and CONNECT tunnels guide](/guides/socks5-connect) for details. |
 | `max_request_body_bytes` | integer | `1048576` (1 MiB) | Maximum request body size that the proxy will buffer. Bodies are only buffered when a transform needs to inspect them. |
 | `max_response_body_bytes` | integer | `0` (unlimited) | Maximum response body size that the proxy will buffer. Set to `0` to disable the limit. |
+| `upstream_response_header_timeout` | duration | `"30s"` | Maximum time to wait for an upstream to begin sending response headers. Raise this for slow upstreams (e.g., long-running LLM calls). Invalid or non-positive durations are rejected at startup. |
+| `upstream_deny_cidrs` | string[] | IMDS + loopback (see below) | CIDR ranges the proxy will refuse to dial regardless of allowlist contents. Enforced after DNS resolution, so hostnames that resolve into a denied range are refused before TCP connect. Set to `[]` to opt out. |
+
+### `upstream_deny_cidrs` Defaults
+
+When `upstream_deny_cidrs` is unset, iron-proxy blocks cloud instance metadata and loopback by default:
+
+- `169.254.169.254/32` (AWS / GCP / Azure IPv4 IMDS)
+- `fd00:ec2::254/128` (AWS IPv6 IMDS)
+- `127.0.0.0/8` (IPv4 loopback)
+- `::1/128` (IPv6 loopback)
+
+The defaults intentionally omit RFC1918 ranges, since many iron-proxy deployments target private corporate networks.
+
+Provide an explicit list to override the defaults entirely, or an empty list to opt out:
+
+```yaml
+proxy:
+  upstream_deny_cidrs:
+    - "169.254.169.254/32"
+    - "127.0.0.0/8"
+```
+
+If a workload legitimately needs to talk to IMDS or loopback through the proxy, override the list before upgrading or the proxy will refuse those connections.
 
 ## `tls`
 
@@ -210,7 +240,7 @@ There are two ways to specify allowed destinations: flat lists (`domains` and `c
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `domains` | string[] | `[]` | Hostname glob patterns to allow (e.g., `registry.npmjs.org`, `*.anthropic.com`). All methods and paths are permitted. |
+| `domains` | string[] | `[]` | Hostname glob patterns to allow (e.g., `registry.npmjs.org`, `*.anthropic.com`). A bare `"*"` matches any host as a catch-all. All methods and paths are permitted. |
 | `cidrs` | string[] | `[]` | CIDR ranges to allow (e.g., `10.0.0.0/8`). All methods and paths are permitted. |
 | `rules` | object[] | `[]` | Rules with optional method and path restrictions. See below. |
 | `warn` | boolean | `false` | When `true`, violations are logged but not blocked. Useful for rolling out allowlists incrementally. |
@@ -221,7 +251,7 @@ Each rule matches a single host or CIDR, with optional method and path filters. 
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `host` | string | | Hostname glob pattern. Mutually exclusive with `cidr`. |
+| `host` | string | | Hostname glob pattern. A bare `"*"` matches any host. Mutually exclusive with `cidr`. |
 | `cidr` | string | | CIDR range. Mutually exclusive with `host`. |
 | `methods` | string[] | all | HTTP methods to allow (e.g., `["GET", "POST"]`). Omit or set to `["*"]` to allow all methods. |
 | `paths` | string[] | all | Path patterns to allow (e.g., `["/v1/*"]`). Must start with `/`. Supports `*` wildcards. Omit to allow all paths. |
@@ -336,9 +366,10 @@ In replace mode, the workload sends a proxy token that the proxy swaps for the r
 | `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
 | `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
 | `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
+| `match_path` | boolean | `false` | When `true`, scan `req.URL.Path` for the proxy token and swap in the resolved secret. Off by default because URL paths often appear in access logs on either side of the proxy. |
 | `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present in any scanned location. Prevents workloads from bypassing secret management. |
 
-The `proxy_value`, `match_headers`, `match_body`, and `require` fields may also be set at the top level of a secret entry for backwards compatibility. New configurations should use the `replace` block.
+The `proxy_value`, `match_headers`, `match_body`, `match_path`, and `require` fields may also be set at the top level of a secret entry for backwards compatibility. New configurations should use the `replace` block.
 
 ### `annotate`
 
