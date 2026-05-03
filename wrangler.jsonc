@@ -1,19 +1,14 @@
 {
-  "main": ".open-next/worker.js",
   "name": "docs",
   "compatibility_date": "2025-03-25",
-  "compatibility_flags": ["nodejs_compat"],
   "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS",
-  },
-  "images": {
-    "binding": "IMAGES",
+    "directory": "docs/dist",
+    "not_found_handling": "single-page-application"
   },
   "routes": [
     {
       "pattern": "docs.iron.sh",
-      "custom_domain": true,
-    },
-  ],
+      "custom_domain": true
+    }
+  ]
 }

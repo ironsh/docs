@@ -1,7 +1,0 @@
-{
-  "deployment-methods": "Deployment Methods",
-  "configuration": "Configuration",
-  "secret-proxying": "Secret Proxying",
-  "llm-judge": "LLM Judge",
-  "ca-certificates": "CA Certificates"
-}
