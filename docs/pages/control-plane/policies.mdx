@@ -45,6 +45,56 @@ Save the policy. Every connected proxy with a matching tag set applies the chang
 
 ::::
 
+## Add a Secret
+
+Secrets let matching proxies inject or replace credentials at the network edge so the workload never sees the real value. Secrets are authored in the **Secrets** tab and are independent of policies: they have their own match-tag set and their own request rules, and apply to any proxy that matches, regardless of which policies that proxy carries.
+
+Click **Add Secret** to start the four-step wizard.
+
+::::steps
+### Pick the Proxies
+
+<img src="/images/control-plane-secret-step1-tags.png" alt="Step 1 of the secret wizard: a tags input asking which proxies should hold this secret" style={{ marginTop: "1rem" }} />
+
+Type a tag and press comma or enter to add it. The credential is only loaded onto proxies that carry every tag in the set. Use the same tagging conventions you use for policy match tags: `env:prod`, `tenant:acme-corp`, `service:checkout`. Leave the field empty to load the secret onto every proxy in the fleet.
+
+### Pick the Requests
+
+<img src="/images/control-plane-secret-step2-rules.png" alt="Step 2: a rule with Host, Path, and Methods fields scoping which requests get the secret" style={{ marginTop: "1rem" }} />
+
+Within the matched proxies, only requests that match one of these rules get the credential. Anything else passes through untouched. Each rule has the same fields as an egress rule:
+
+- **Host.** A hostname or glob, e.g. `api.openai.com` or `*.example.com`.
+- **Path.** Zero or more path patterns; leave empty to apply to any path. `/*` matches anything.
+- **Methods.** The HTTP methods the rule applies to. `ALL` covers every method.
+
+Click **+ Add rule** for additional rules. Rules are OR'd: a request matches if it matches any rule.
+
+Always scope as narrowly as you can. The blast radius of a misconfigured secret is exactly the union of these rules.
+
+### Pick the Injection Style
+
+<img src="/images/control-plane-secret-step3-injection.png" alt="Step 3: presets for Bearer token, Basic auth, Custom, and Replace path token, with header and format fields" style={{ marginTop: "1rem" }} />
+
+Choose how the proxy rewrites the request in flight. Four presets cover the common cases:
+
+- **Bearer token.** Adds `Authorization: Bearer <value>`. Standard for OpenAI, Anthropic, and most modern APIs.
+- **Basic auth.** Adds `Authorization: Basic base64(user:password)`. Use this for GitHub PAT auth and other Basic-auth services.
+- **Custom.** Inject into any header or query parameter, with a Go-template `Format` field that has access to `.Value` and a `base64` helper. Use this when none of the presets fit.
+- **Replace path token.** Swaps a placeholder you control out of the URL path for the real value before forwarding. Useful for upstreams like Telegram that put the credential in the path.
+
+The **Preview** at the bottom of the step shows exactly what the upstream will see, so you can verify the format before saving.
+
+### Pick the Source
+
+<img src="/images/control-plane-secret-step4-source.png" alt="Step 4: a Source dropdown with Environment variable selected and a Variable field" style={{ marginTop: "1rem" }} />
+
+Select where the proxy should resolve the real value from at startup. The value never appears in the control plane: it is read locally on the proxy host.
+
+iron-proxy supports several backends here, including environment variables, AWS Secrets Manager, AWS Systems Manager Parameter Store, and 1Password. See [Secret Proxying](/reference/secret-proxying) for the full set of source backends, the fields each one takes, TTL behavior, and credential-chain notes.
+
+::::
+
 ## Match Tags
 
 Match tags are how a policy is pinned to a subset of the fleet. A proxy is subject to a policy when it carries every tag in the policy's match set. A proxy can be matched by multiple policies at once, and their allowed rules combine.
@@ -54,6 +104,14 @@ Because tags are assigned at [enrollment](./enrollment), you can roll out a new 
 ## Priority
 
 Priority only matters when two matching policies disagree about the same host and method. In that case, the policy with the lower priority number wins, so `priority: 1` beats `priority: 10`. Most fleets don't need priority tuning: start with the default and adjust only if you see policies stepping on each other.
+
+## Per-User and Per-Tenant Policies
+
+To scope a policy to a single user, customer, or tenant, encode the identity in tags. When you generate an [enrollment token](./enrollment) for a proxy that will run on behalf of a specific identity, include that identity in the token's tag set: `tenant:acme-corp`, `user:alice@example.com`, `customer-id:c_8f3a2b`. Every proxy registered with the token inherits those tags, and every audit event the proxy emits is indexed by them.
+
+Put that identity tag in the policy's match set. A policy with match tags `tenant:acme-corp` only applies to proxies that carry the `tenant:acme-corp` tag, so you can give each tenant a different egress allowlist by writing one policy per tenant. The same pattern works for per-user sandboxes (`user:alice@example.com`) or per-customer workloads in a multi-tenant runtime.
+
+Layered tagging gets you fleet-wide baselines plus per-identity overlays. A proxy can match multiple policies at once and the allowed rules combine, so a baseline policy with no match tags (applies to everyone) can grant common destinations like package registries, while per-tenant policies layer on the destinations only that tenant should reach. For compliance reporting, filter the audit trail by the same tenant or user tag to get a per-identity record of every request that proxy made.
 
 ## Rolling Out Safely
 

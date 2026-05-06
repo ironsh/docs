@@ -105,6 +105,7 @@ export default defineConfig({
         { text: "Overview", link: "/control-plane/overview" },
         { text: "Enrollment", link: "/control-plane/enrollment" },
         { text: "Policies", link: "/control-plane/policies" },
+        { text: "Self-Hosted", link: "/control-plane/self-hosted" },
       ],
     },
     {
