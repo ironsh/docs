@@ -12,10 +12,10 @@ Policies are authored once and converge across every connected proxy in seconds.
 ## Architecture
 
 <svg
-  viewBox="0 0 800 460"
+  viewBox="0 0 800 400"
   xmlns="http://www.w3.org/2000/svg"
   role="img"
-  aria-label="Operators author policies in the control plane, which pushes configuration down to enrolled proxies and ingests their audit events. Each proxy intercepts egress traffic from its workload before it reaches the internet."
+  aria-label="Operators author policies in the control plane, which pushes configuration down to enrolled proxies and ingests their audit events. Each proxy intercepts egress traffic from its workload."
   style={{ width: "100%", height: "auto", marginTop: "1.5rem", marginBottom: "1.5rem", color: "currentColor" }}
 >
   <defs>
@@ -87,15 +87,6 @@ Policies are authored once and converge across every connected proxy in seconds.
       <text x="650" y="362" textAnchor="middle" opacity="0.6" fontSize="11">agent sandbox</text>
     </g>
 
-    <g>
-      <rect x="320" y="420" width="160" height="30" rx="4" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.75" />
-      <text x="400" y="440" textAnchor="middle" opacity="0.85">internet (allowed only)</text>
-      <line x1="150" y1="380" x2="150" y2="405" stroke="currentColor" strokeWidth="1.25" opacity="0.5" />
-      <line x1="400" y1="380" x2="400" y2="420" stroke="currentColor" strokeWidth="1.25" opacity="0.5" markerEnd="url(#arrow)" />
-      <line x1="650" y1="380" x2="650" y2="405" stroke="currentColor" strokeWidth="1.25" opacity="0.5" />
-      <path d="M 150 405 L 320 405 L 320 420" stroke="currentColor" strokeWidth="1.25" fill="none" opacity="0.5" markerEnd="url(#arrow)" />
-      <path d="M 650 405 L 480 405 L 480 420" stroke="currentColor" strokeWidth="1.25" fill="none" opacity="0.5" markerEnd="url(#arrow)" />
-    </g>
   </g>
 </svg>
 
