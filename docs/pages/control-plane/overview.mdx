@@ -9,6 +9,98 @@ A single iron-proxy is a default-deny firewall for one workload. A fleet of them
 
 Policies are authored once and converge across every connected proxy in seconds. New proxies enroll on boot with a short-lived token and pull their config on first connect. There is nothing baked into the image and nothing to template per host. Every intercepted request from every proxy streams into a unified audit store you can query by workload, destination, policy decision, or injected secret.
 
+## Architecture
+
+<svg
+  viewBox="0 0 800 460"
+  xmlns="http://www.w3.org/2000/svg"
+  role="img"
+  aria-label="Operators author policies in the control plane, which pushes configuration down to enrolled proxies and ingests their audit events. Each proxy intercepts egress traffic from its workload before it reaches the internet."
+  style={{ width: "100%", height: "auto", marginTop: "1.5rem", marginBottom: "1.5rem", color: "currentColor" }}
+>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e05a2b" />
+    </marker>
+  </defs>
+
+  <g fontFamily="ui-sans-serif, system-ui, sans-serif" fontSize="13" fill="currentColor">
+    <rect x="20" y="20" width="140" height="56" rx="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <text x="90" y="44" textAnchor="middle" fontWeight="600">Operator</text>
+    <text x="90" y="62" textAnchor="middle" opacity="0.7">authors policy</text>
+
+    <rect x="240" y="10" width="320" height="76" rx="8" fill="#e05a2b" stroke="#e05a2b" strokeWidth="1.5" />
+    <text x="400" y="36" textAnchor="middle" fontWeight="700" fill="#ffffff">Control Plane</text>
+    <text x="400" y="56" textAnchor="middle" fill="#ffffff" opacity="0.92">Policies · Enrollment · Audit Store</text>
+    <text x="400" y="72" textAnchor="middle" fill="#ffffff" opacity="0.75" fontSize="11">hosted or self-hosted</text>
+
+    <line x1="160" y1="48" x2="240" y2="48" stroke="currentColor" strokeWidth="1.5" markerEnd="url(#arrow)" />
+
+    <g stroke="#e05a2b" strokeWidth="1.5" fill="none">
+      <path d="M 320 86 L 320 160 L 150 160 L 150 200" markerEnd="url(#arrowAccent)" />
+      <path d="M 400 86 L 400 200" markerEnd="url(#arrowAccent)" />
+      <path d="M 480 86 L 480 160 L 650 160 L 650 200" markerEnd="url(#arrowAccent)" />
+    </g>
+    <text x="400" y="118" textAnchor="middle" fill="#e05a2b" fontSize="11" fontWeight="600">live config push</text>
+
+    <g stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 3" fill="none" opacity="0.55">
+      <path d="M 170 200 L 170 140 L 360 140 L 360 86" markerEnd="url(#arrow)" />
+      <path d="M 420 200 L 420 96" markerEnd="url(#arrow)" />
+      <path d="M 670 200 L 670 140 L 440 140 L 440 86" markerEnd="url(#arrow)" />
+    </g>
+    <text x="600" y="132" textAnchor="middle" fill="currentColor" fontSize="11" opacity="0.7">audit events</text>
+
+    <g>
+      <rect x="80" y="200" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <text x="150" y="224" textAnchor="middle" fontWeight="600">iron-proxy</text>
+      <text x="150" y="244" textAnchor="middle" opacity="0.7" fontSize="11">env:dev</text>
+
+      <rect x="330" y="200" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <text x="400" y="224" textAnchor="middle" fontWeight="600">iron-proxy</text>
+      <text x="400" y="244" textAnchor="middle" opacity="0.7" fontSize="11">env:prod · ci</text>
+
+      <rect x="580" y="200" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <text x="650" y="224" textAnchor="middle" fontWeight="600">iron-proxy</text>
+      <text x="650" y="244" textAnchor="middle" opacity="0.7" fontSize="11">tenant:acme</text>
+    </g>
+
+    <g stroke="currentColor" strokeWidth="1.5" fill="none">
+      <line x1="150" y1="320" x2="150" y2="262" markerEnd="url(#arrow)" />
+      <line x1="400" y1="320" x2="400" y2="262" markerEnd="url(#arrow)" />
+      <line x1="650" y1="320" x2="650" y2="262" markerEnd="url(#arrow)" />
+    </g>
+
+    <g>
+      <rect x="80" y="320" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.85" />
+      <text x="150" y="344" textAnchor="middle">workload</text>
+      <text x="150" y="362" textAnchor="middle" opacity="0.6" fontSize="11">CI runner</text>
+
+      <rect x="330" y="320" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.85" />
+      <text x="400" y="344" textAnchor="middle">workload</text>
+      <text x="400" y="362" textAnchor="middle" opacity="0.6" fontSize="11">build container</text>
+
+      <rect x="580" y="320" width="140" height="60" rx="6" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.85" />
+      <text x="650" y="344" textAnchor="middle">workload</text>
+      <text x="650" y="362" textAnchor="middle" opacity="0.6" fontSize="11">agent sandbox</text>
+    </g>
+
+    <g>
+      <rect x="320" y="420" width="160" height="30" rx="4" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.75" />
+      <text x="400" y="440" textAnchor="middle" opacity="0.85">internet (allowed only)</text>
+      <line x1="150" y1="380" x2="150" y2="405" stroke="currentColor" strokeWidth="1.25" opacity="0.5" />
+      <line x1="400" y1="380" x2="400" y2="420" stroke="currentColor" strokeWidth="1.25" opacity="0.5" markerEnd="url(#arrow)" />
+      <line x1="650" y1="380" x2="650" y2="405" stroke="currentColor" strokeWidth="1.25" opacity="0.5" />
+      <path d="M 150 405 L 320 405 L 320 420" stroke="currentColor" strokeWidth="1.25" fill="none" opacity="0.5" markerEnd="url(#arrow)" />
+      <path d="M 650 405 L 480 405 L 480 420" stroke="currentColor" strokeWidth="1.25" fill="none" opacity="0.5" markerEnd="url(#arrow)" />
+    </g>
+  </g>
+</svg>
+
+The control plane is the single source of truth. Operators publish policies once; the control plane fans them out to every connected proxy in seconds. Each proxy enforces locally against its workload's egress and streams audit events back. New proxies enroll with a short-lived token and pick up the right policies based on the tags they carry.
+
 ## What You Get
 
 **Policy as the source of truth.** Allowlists, secret mappings, and transform rules live in the control plane and are versioned there. Proxies are stateless clients; rebuild a host and it pulls the current policy on reconnect. There is no per-host YAML to drift.

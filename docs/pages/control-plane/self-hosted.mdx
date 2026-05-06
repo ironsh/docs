@@ -1,0 +1,28 @@
+---
+title: "Self-Hosted"
+description: "Run the iron-proxy control plane inside your own infrastructure."
+---
+
+# Self-Hosted
+
+The control plane runs inside your own network with the same software, API, and proxy protocol as the hosted version. Policy data, enrollment tokens, and audit logs never leave your infrastructure, and the deployment can be fully air-gapped. Source is available.
+
+A complete deployment bundle (container images, manifests, and an installation guide) is available on request. The page below covers the system requirements so you can size the host before reaching out.
+
+## System Requirements
+
+The control plane is a single Docker container plus a database. There are no other required services.
+
+**Compute.** A single host or pod is enough for fleets up to a few hundred proxies. We recommend 4 vCPUs and 8 GB of memory. The container is stateless, so additional replicas can sit behind a load balancer without coordination if you need to scale beyond that.
+
+**Database.** PostgreSQL 14 or newer. Stores policies, enrollment tokens, proxy registrations, and tags. A managed instance (RDS, Cloud SQL, Neon, etc.) or a self-managed cluster both work. Plan for ~1 GB of storage for fleets up to a few thousand proxies; audit data goes elsewhere.
+
+**Audit log store (optional).** Audit events can be written to any OTLP-compatible log backend: Grafana Loki, Tempo, Honeycomb, Datadog, an OpenTelemetry collector fanning out to your own pipeline, or the bundled local store for evaluation. See [Exporting Logs to OpenTelemetry](/guides/otel-export) for the export format. If you skip this, audit search is limited to recent events held in memory.
+
+**Networking.** Inbound: HTTPS on a single port serves both the operator UI/API and the enrolled proxy connections. Outbound: only what you choose to allow (e.g. SSO, your audit backend). The control plane does not phone home.
+
+**TLS.** A certificate the proxies and operators can validate. Bring your own cert and key, or terminate at an ingress.
+
+## Get the Deployment Bundle
+
+The self-hosted bundle ships under a source-available license with a short evaluation agreement. [Get in touch](https://cal.com/matt-slipper-ironsh/15min) and we'll walk through requirements, send the bundle, and stay on for the first install.
