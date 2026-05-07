@@ -130,6 +130,7 @@ export default defineConfig({
         { text: "Configuration", link: "/reference/configuration" },
         { text: "Secret Proxying", link: "/reference/secret-proxying" },
         { text: "LLM Judge", link: "/reference/llm-judge" },
+        { text: "MCP Interception", link: "/reference/mcp-interception" },
         { text: "CA Certificates", link: "/reference/ca-certificates" },
       ],
     },

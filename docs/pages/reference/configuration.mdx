@@ -138,6 +138,39 @@ transforms:
         Allow writes to the repository under review. Deny writes to user
         settings, billing, or any other repository.
 
+  - name: header_allowlist
+    config:
+      headers:
+        - "Authorization"
+        - "Content-Type"
+        - "User-Agent"
+        - "Accept"
+        - "/^X-Trace-.*$/"
+      rules:
+        - host: "api.openai.com"
+
+mcp:
+  error:
+    code: -32001
+    message: "blocked by iron-proxy policy"
+  servers:
+    - name: github
+      rules:
+        - host: "mcp.github.com"
+          paths: ["/mcp", "/mcp/*"]
+      tools:
+        - name: "search_repositories"
+        - name: "create_issue"
+          when:
+            - path: "owner"
+              equals: "ironsh"
+            - path: "repo"
+              in: ["iron-proxy"]
+
+management:
+  listen: "127.0.0.1:9092"
+  api_key_env: "IRON_MANAGEMENT_API_KEY"
+
 metrics:
   listen: ":9090"
 
@@ -383,7 +416,7 @@ In replace mode, the workload sends a proxy token that the proxy swaps for the r
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
-| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. |
+| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. Each entry is either a literal header name (case-insensitive) or a `/regex/` pattern compiled at config time as a case-insensitive regular expression matched against canonical header names. Literal and regex entries can be mixed. |
 | `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
 | `match_path` | boolean | `false` | When `true`, scan `req.URL.Path` for the proxy token and swap in the resolved secret. Off by default because URL paths often appear in access logs on either side of the proxy. |
 | `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present in any scanned location. Prevents workloads from bypassing secret management. |
@@ -543,6 +576,116 @@ provider:
 ```
 
 Place the `judge` transform before the `secrets` transform so the LLM provider sees proxy tokens rather than real credentials. See [pipeline ordering](/reference/llm-judge#pipeline-ordering) for details.
+
+### `header_allowlist`
+
+Strips any request header not present in a configured allowlist before forwarding the request upstream. The allowlist uses a default-deny model: every header must match either a literal name or a regex pattern to pass through. Stripped header names are recorded in the trace annotation `stripped_headers`.
+
+Place this transform after any transforms that inject headers (such as `secrets`) so injected headers survive the allowlist.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `headers` | string[] | `[]` | Allowed header names. Each entry is either a literal name (case-insensitive) or a `/regex/` pattern compiled at config time as a case-insensitive regular expression matched against canonical header names. |
+| `rules` | object[] | `[]` | Restrict the allowlist to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). When omitted, the allowlist applies to all requests. |
+
+```yaml
+- name: header_allowlist
+  config:
+    headers:
+      - "Authorization"
+      - "Content-Type"
+      - "User-Agent"
+      - "Accept"
+      - "/^X-Trace-.*$/"
+    rules:
+      - host: "api.openai.com"
+```
+
+## `mcp`
+
+Top-level block that enforces a default-deny tool allowlist on Streamable HTTP MCP servers. The interceptor runs after the transform pipeline, so `allowlist` still gates which hosts can be reached and `secrets` has already swapped proxy tokens before the interceptor evaluates the body.
+
+See the [MCP Interception reference](/reference/mcp-interception) for a full overview, including matchers, audit log behavior, and current limitations.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `error` | object | | JSON-RPC error envelope returned for denied calls. See below. |
+| `servers` | object[] | `[]` | List of MCP server policies. See below. |
+
+### `mcp.error`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `code` | integer | `-32001` | JSON-RPC error code returned to the agent when a `tools/call` is denied. |
+| `message` | string | `"blocked by iron-proxy policy"` | Error message returned alongside `code`. |
+
+### `mcp.servers[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | **required** | Identifier for this server policy, used in audit logs. |
+| `rules` | object[] | **required** | Destinations this policy applies to. Uses the same format as [`allowlist.rules[]`](#allowlistrules). |
+| `tools` | object[] | `[]` | Tools allowed on this server. Anything not listed is denied (default-deny). |
+
+### `mcp.servers[].tools[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | **required** | Tool name to allow. Matches the `name` field in the MCP `tools/call` request and the `tools/list` response. |
+| `when` | object[] | `[]` | Argument matchers. All matchers must pass for the call to be allowed. See below. |
+
+### `mcp.servers[].tools[].when[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `path` | string | **required** | Dotted path within `params.arguments` to evaluate (e.g., `"owner"`, `"repo"`). |
+| `equals` | any | | Exact match. Mutually exclusive with `in` and `matches`. |
+| `in` | array | | Match any of the listed values. Mutually exclusive with `equals` and `matches`. |
+| `matches` | string | | Regular expression match against the stringified value. Mutually exclusive with `equals` and `in`. |
+
+```yaml
+mcp:
+  error:
+    code: -32001
+    message: "blocked by iron-proxy policy"
+  servers:
+    - name: github
+      rules:
+        - host: "mcp.github.com"
+          paths: ["/mcp", "/mcp/*"]
+      tools:
+        - name: "search_repositories"
+        - name: "create_issue"
+          when:
+            - path: "owner"
+              equals: "ironsh"
+            - path: "repo"
+              in: ["iron-proxy", "tunis-v2"]
+```
+
+## `management`
+
+Configures an opt-in, bearer-authenticated HTTP management API. When set, iron-proxy listens on the configured address and exposes endpoints that operate on the running process. The API is disabled when the `management` block is omitted.
+
+The first available endpoint is `POST /v1/reload`, which re-reads the YAML config from disk and atomically swaps in a freshly built transform pipeline with no restart and no dropped connections. Parse or build errors return HTTP 422 and leave the running pipeline untouched.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `listen` | string | **required** | Address and port for the management API. Bind to a loopback address (e.g., `127.0.0.1:9092`) unless the API is exposed via a separate network. |
+| `api_key_env` | string | `IRON_MANAGEMENT_API_KEY` | Environment variable holding the bearer token clients must present in the `Authorization: Bearer ...` header. |
+
+```yaml
+management:
+  listen: "127.0.0.1:9092"
+  api_key_env: "IRON_MANAGEMENT_API_KEY"
+```
+
+Reload a running proxy:
+
+```sh
+curl -X POST http://127.0.0.1:9092/v1/reload \
+  -H "Authorization: Bearer $IRON_MANAGEMENT_API_KEY"
+```
 
 ## `metrics`
 
