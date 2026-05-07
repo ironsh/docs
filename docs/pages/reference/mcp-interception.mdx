@@ -1,0 +1,118 @@
+---
+title: "MCP Interception"
+description: "How iron-proxy enforces a default-deny tool allowlist on Streamable HTTP MCP servers."
+---
+
+# MCP Interception
+
+iron-proxy can enforce a default-deny tool allowlist on Model Context Protocol (MCP) servers. Denied `tools/call` invocations are rejected with a JSON-RPC error envelope before they reach the upstream server, and `tools/list` responses are filtered so denied tools never appear in the agent's tool catalog.
+
+MCP interception is configured under the top-level [`mcp` block](/reference/configuration#mcp) in your iron-proxy YAML config.
+
+## How It Works
+
+When a request matches an `mcp.servers[]` entry, iron-proxy parses the JSON-RPC body and applies the following rules:
+
+1. **`tools/call` (request)**: the tool name and arguments are matched against the configured allowlist. Calls that match an allowed tool (and pass any `when` matchers) are forwarded upstream. Calls that do not match are rejected with the configured JSON-RPC error envelope, without contacting the upstream server.
+2. **`tools/list` (response)**: each tool in the response is matched against the allowlist. Tools that are not allowed are stripped from the response before it reaches the agent. Filtering runs per-event over both `application/json` and `text/event-stream` responses.
+3. **Other JSON-RPC methods**: forwarded unchanged. Resources and prompts (`resources/list`, `resources/read`, etc.) are not policy-filtered in this version.
+
+The interceptor runs after the transform pipeline. This means:
+
+- The `allowlist` transform still gates which hosts can be reached. MCP rules apply only to traffic that the allowlist already permits.
+- The `secrets` transform has already swapped proxy tokens for real values by the time the interceptor evaluates the JSON-RPC body. Argument matchers see real argument values, not proxy tokens.
+
+## Configuration
+
+The `mcp` block has two parts: an `error` template that shapes the JSON-RPC error envelope returned for denied calls, and a `servers` list that declares per-server policies.
+
+```yaml
+mcp:
+  error:
+    code: -32001
+    message: "blocked by iron-proxy policy"
+  servers:
+    - name: github
+      rules:
+        - host: "mcp.github.com"
+          paths: ["/mcp", "/mcp/*"]
+      tools:
+        - name: "search_repositories"
+        - name: "create_issue"
+          when:
+            - path: "owner"
+              equals: "ironsh"
+            - path: "repo"
+              in: ["iron-proxy", "tunis-v2"]
+```
+
+In this example, requests to `mcp.github.com/mcp` and `mcp.github.com/mcp/*` go through the `github` policy. The agent can call `search_repositories` with any arguments and `create_issue` only when `owner` is `ironsh` and `repo` is one of the listed repositories. Every other tool name is denied. `tools/list` responses are filtered to expose only `search_repositories` and `create_issue`.
+
+See the [configuration reference](/reference/configuration#mcp) for the full schema.
+
+## Argument Matchers
+
+Each entry under `tools[]` may carry a `when` list that constrains which argument values are allowed. All matchers must pass for the call to be allowed; if any fails, the call is denied. The `path` field selects a value from `params.arguments` using dotted notation.
+
+| Matcher | Meaning |
+|---|---|
+| `equals` | The value at `path` must equal the supplied value. |
+| `in` | The value at `path` must be one of the supplied values. |
+| `matches` | The value at `path` (stringified) must match the supplied regular expression. |
+
+```yaml
+tools:
+  - name: "create_issue"
+    when:
+      - path: "owner"
+        equals: "ironsh"
+      - path: "repo"
+        in: ["iron-proxy", "tunis-v2"]
+      - path: "title"
+        matches: "^\\[bot\\]"
+```
+
+A tool entry without a `when` block allows the tool to be called with any arguments.
+
+## Denied Calls
+
+When a `tools/call` is denied, iron-proxy returns a JSON-RPC error response using the configured `mcp.error` template. The response preserves the request's `id` so the agent's MCP client correlates the error with the originating call. The upstream server is never contacted.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "error": {
+    "code": -32001,
+    "message": "blocked by iron-proxy policy"
+  }
+}
+```
+
+Choose `code` and `message` values that your agent recognizes. The defaults are suitable for most agents, since `-32001` falls in the JSON-RPC server-defined error range.
+
+## Tool List Filtering
+
+`tools/list` responses are filtered per-event so denied tools are removed from the agent's catalog. Filtering applies to both `application/json` responses and `text/event-stream` streamed responses. The agent only ever discovers tools that the policy allows, which keeps tool selection consistent with the enforced policy.
+
+## Audit Log
+
+The audit log gains a top-level `mcp` section with one structured record per JSON-RPC message observed. Each record captures the message type, the tool name (when present), and the resulting policy decision. Use this to verify that denied calls match your expectations and to investigate agent behavior over time.
+
+## Pipeline Ordering
+
+The interceptor evaluates the request body after the transform pipeline finishes. Place transforms accordingly:
+
+- **`allowlist`**: must permit the MCP server's host before MCP rules can apply. A request blocked by the allowlist never reaches the interceptor.
+- **`secrets`**: any proxy tokens are replaced before MCP evaluates `params.arguments`. Argument matchers see real values, so write `equals` or `in` matchers against real argument values rather than proxy tokens.
+- **`judge`**: place an LLM judge before `secrets` if you want it to evaluate proxy tokens, as documented in the [LLM Judge reference](/reference/llm-judge#pipeline-ordering). The MCP interceptor runs after both.
+
+## Limitations
+
+The current MCP interceptor (v1) has the following limitations:
+
+- Only the Streamable HTTP transport is supported. Legacy HTTP plus SSE transport is not.
+- A JSON-RPC batch is rejected as a whole if any entry in the batch is denied. Per-entry partial denial is not supported.
+- Resources and prompts (`resources/list`, `resources/read`, and related methods) are not policy-filtered. Only `tools/call` and `tools/list` are evaluated.
+
+These limitations may change in future releases. Check the [release notes](https://github.com/ironsh/iron-proxy/releases) for updates.
