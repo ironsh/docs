@@ -106,6 +106,16 @@ export default defineConfig({
         { text: "Enrollment", link: "/control-plane/enrollment" },
         { text: "Policies", link: "/control-plane/policies" },
         { text: "Self-Hosted", link: "/control-plane/self-hosted" },
+        {
+          text: "API Reference",
+          collapsed: true,
+          items: [
+            { text: "Overview", link: "/control-plane/api/overview" },
+            { text: "Network Policies", link: "/control-plane/api/network-policies" },
+            { text: "Secret Policies", link: "/control-plane/api/secret-policies" },
+            { text: "MCP Policies", link: "/control-plane/api/mcp-policies" },
+          ],
+        },
       ],
     },
     {
