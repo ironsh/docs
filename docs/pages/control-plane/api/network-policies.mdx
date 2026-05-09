@@ -1,0 +1,181 @@
+---
+title: "Network Policies API"
+description: "Manage iron-proxy egress allowlists over the control plane API."
+---
+
+# Network Policies API
+
+Network policies are named egress allowlists. Each policy targets a subset of the fleet by tag and lists the hosts, paths, and methods those proxies are allowed to reach. See [Policies](/control-plane/policies) for the conceptual overview.
+
+Base path: `/v1/policies/network`
+
+## The Network Policy Object
+
+```json
+{
+  "id": "npol_01H8XYZ...",
+  "name": "default-egress",
+  "active": true,
+  "priority": 0,
+  "match_tags": ["production"],
+  "rules": [
+    { "host": "*.example.com", "paths": [], "methods": [] }
+  ],
+  "version": 1,
+  "created_at": "2026-05-08T12:00:00Z",
+  "updated_at": "2026-05-08T12:00:00Z"
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Server-assigned opaque ID, prefixed with `npol_`. |
+| `name` | string | URL-safe name, unique within the organization. Must match `[a-z0-9]+(-[a-z0-9]+)*`. |
+| `active` | boolean | When `false`, the policy is stored but not delivered to proxies. Defaults to `true`. |
+| `priority` | integer | Tie-breaker when more than one policy applies to the same proxy. Lower wins. Required. |
+| `match_tags` | string[] | Tags a proxy must carry for the policy to apply. Empty applies to every proxy. Defaults to `[]`. |
+| `rules` | object[] | Egress rules. See [Rule object](#rule-object). Defaults to `[]`. |
+| `version` | integer | Schema version for the rule body. Defaults to `1`. |
+| `created_at` | string | RFC 3339 timestamp. |
+| `updated_at` | string | RFC 3339 timestamp. |
+
+### Rule Object
+
+```json
+{ "host": "api.example.com", "paths": ["/v1/*"], "methods": ["GET", "POST"] }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `host` | string | Hostname or wildcard, e.g. `api.example.com` or `*.example.com`. Required. |
+| `paths` | string[] | Path patterns. Empty allows any path. |
+| `methods` | string[] | HTTP methods. Empty allows any method. |
+
+## List Network Policies
+
+```http
+GET /v1/policies/network
+```
+
+Returns every network policy in the calling organization, ordered by `priority` ascending.
+
+### Query Parameters
+
+| Name | Type | Description |
+|---|---|---|
+| `name` | string | Exact match on policy name. |
+| `active` | boolean | When supplied, returns only policies with that active state. |
+
+### Example
+
+```sh
+curl https://api.iron.sh/v1/policies/network \
+  -H "Authorization: Bearer $IRON_API_KEY"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": "npol_01H...",
+      "name": "default-egress",
+      "active": true,
+      "priority": 0,
+      "match_tags": ["production"],
+      "rules": [{ "host": "*.example.com", "paths": [], "methods": [] }],
+      "version": 1,
+      "created_at": "2026-05-08T12:00:00Z",
+      "updated_at": "2026-05-08T12:00:00Z"
+    }
+  ]
+}
+```
+
+## Create a Network Policy
+
+```http
+POST /v1/policies/network
+```
+
+### Request Body
+
+| Field | Type | Required |
+|---|---|---|
+| `name` | string | Yes |
+| `priority` | integer | Yes |
+| `active` | boolean | No |
+| `match_tags` | string[] | No |
+| `rules` | object[] | No |
+| `version` | integer | No |
+
+### Example
+
+```sh
+curl https://api.iron.sh/v1/policies/network \
+  -H "Authorization: Bearer $IRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "api-egress",
+    "priority": 42,
+    "match_tags": ["production", "api"],
+    "rules": [
+      { "host": "api.example.com", "paths": ["/v1/*"], "methods": ["GET", "POST"] }
+    ]
+  }'
+```
+
+Returns `201 Created` with the new policy in `data`.
+
+## Retrieve a Network Policy
+
+```http
+GET /v1/policies/network/:id
+```
+
+```sh
+curl https://api.iron.sh/v1/policies/network/npol_01H... \
+  -H "Authorization: Bearer $IRON_API_KEY"
+```
+
+Returns `200 OK` with the policy in `data`, or `404 Not Found` with code `network_policy_not_found`.
+
+## Update a Network Policy
+
+```http
+PUT /v1/policies/network/:id
+```
+
+`GET` the policy, modify the fields you want to change, and `PUT` the full representation back. Send the same fields you would on create.
+
+### Example
+
+```sh
+curl -X PUT https://api.iron.sh/v1/policies/network/npol_01H... \
+  -H "Authorization: Bearer $IRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "default-egress",
+    "priority": 0,
+    "active": false,
+    "match_tags": ["staging"],
+    "rules": [
+      { "host": "staging.example.com", "paths": ["*"], "methods": ["GET"] }
+    ],
+    "version": 1
+  }'
+```
+
+## Delete a Network Policy
+
+```http
+DELETE /v1/policies/network/:id
+```
+
+```sh
+curl -X DELETE https://api.iron.sh/v1/policies/network/npol_01H... \
+  -H "Authorization: Bearer $IRON_API_KEY"
+```
+
+Returns `204 No Content`. Connected proxies stop applying the policy within seconds.

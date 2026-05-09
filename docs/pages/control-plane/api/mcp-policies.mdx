@@ -1,0 +1,192 @@
+---
+title: "MCP Policies API"
+description: "Manage iron-proxy MCP tool allowlists over the control plane API."
+---
+
+# MCP Policies API
+
+MCP policies enforce default-deny tool allowlists on Streamable HTTP MCP servers. See [MCP Interception](/reference/mcp-interception) for the runtime semantics, JSON-RPC handling, and `tools/list` filtering behavior.
+
+Each policy targets a subset of the fleet by tag, scopes which requests it applies to with `rules`, and lists the tools an agent is allowed to call along with optional argument matchers.
+
+Base path: `/v1/policies/mcp`
+
+## The MCP Policy Object
+
+```json
+{
+  "id": "mpol_01H...",
+  "name": "github-mcp",
+  "active": true,
+  "priority": 0,
+  "match_tags": ["production"],
+  "rules": [
+    { "host": "mcp.github.com", "paths": ["/mcp", "/mcp/*"], "methods": ["POST"] }
+  ],
+  "tools": [
+    { "name": "search_repositories", "matchers": [] },
+    {
+      "name": "create_issue",
+      "matchers": [
+        { "path": "owner", "equals": "ironsh" },
+        { "path": "repo", "in": ["iron-proxy", "tunis-v2"] }
+      ]
+    }
+  ],
+  "created_at": "2026-05-08T12:00:00Z",
+  "updated_at": "2026-05-08T12:00:00Z"
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Server-assigned opaque ID, prefixed with `mpol_`. |
+| `name` | string | URL-safe name, unique within the organization. Must match `[a-z0-9]+(-[a-z0-9]+)*`. |
+| `active` | boolean | When `false`, the policy is stored but not delivered to proxies. Defaults to `true`. |
+| `priority` | integer | Tie-breaker when more than one policy applies. Lower wins. Required. |
+| `match_tags` | string[] | Tags a proxy must carry for the policy to apply. Empty applies to every proxy. |
+| `rules` | object[] | Request rules that scope which traffic the MCP interceptor handles. Same shape as [network policy rules](/control-plane/api/network-policies#rule-object). |
+| `tools` | object[] | Allowlisted tools. Tools not listed are denied. |
+| `created_at` | string | RFC 3339 timestamp. |
+| `updated_at` | string | RFC 3339 timestamp. |
+
+### Tool Object
+
+```json
+{
+  "name": "create_issue",
+  "matchers": [
+    { "path": "owner", "equals": "ironsh" },
+    { "path": "repo", "in": ["iron-proxy", "tunis-v2"] },
+    { "path": "title", "matches": "^\\[bot\\]" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | The MCP tool name. Required. |
+| `matchers` | object[] | Argument constraints. All matchers must pass for a `tools/call` to be allowed. Empty allows any arguments. |
+
+### Matcher Object
+
+A matcher selects a value from `params.arguments` by `path` (dotted notation) and applies exactly one of `equals`, `in`, or `matches`.
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Dotted path into the tool arguments. Required. |
+| `equals` | any | Argument at `path` must equal this value. |
+| `in` | any[] | Argument at `path` must be one of these values. |
+| `matches` | string | Argument at `path`, stringified, must match this regular expression. |
+
+Set exactly one of `equals`, `in`, `matches` per matcher. Sending more than one returns `422` with code `validation_error`.
+
+## List MCP Policies
+
+```http
+GET /v1/policies/mcp
+```
+
+Returns every MCP policy in the calling organization, ordered by `priority` ascending.
+
+### Query Parameters
+
+| Name | Type | Description |
+|---|---|---|
+| `name` | string | Exact match on policy name. |
+| `active` | boolean | When supplied, returns only policies with that active state. |
+
+```sh
+curl https://api.iron.sh/v1/policies/mcp \
+  -H "Authorization: Bearer $IRON_API_KEY"
+```
+
+## Create an MCP Policy
+
+```http
+POST /v1/policies/mcp
+```
+
+### Request Body
+
+| Field | Type | Required |
+|---|---|---|
+| `name` | string | Yes |
+| `priority` | integer | Yes |
+| `active` | boolean | No |
+| `match_tags` | string[] | No |
+| `rules` | object[] | No |
+| `tools` | object[] | No |
+
+### Example
+
+```sh
+curl https://api.iron.sh/v1/policies/mcp \
+  -H "Authorization: Bearer $IRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "linear-mcp",
+    "priority": 42,
+    "match_tags": ["production", "linear"],
+    "rules": [
+      { "host": "mcp.linear.app", "paths": ["/mcp"], "methods": ["POST"] }
+    ],
+    "tools": [
+      {
+        "name": "create_issue",
+        "matchers": [
+          { "path": "team", "in": ["eng", "infra"] },
+          { "path": "title", "matches": "^\\[bot\\]" }
+        ]
+      }
+    ]
+  }'
+```
+
+Returns `201 Created` with the new policy in `data`.
+
+## Retrieve an MCP Policy
+
+```http
+GET /v1/policies/mcp/:id
+```
+
+Returns `200 OK` with the policy in `data`, or `404 Not Found` with code `mcp_policy_not_found`.
+
+## Update an MCP Policy
+
+```http
+PUT /v1/policies/mcp/:id
+```
+
+`GET` the policy, modify the fields you want to change, and `PUT` the full representation back. Send the same fields you would on create.
+
+### Example
+
+```sh
+curl -X PUT https://api.iron.sh/v1/policies/mcp/mpol_01H... \
+  -H "Authorization: Bearer $IRON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "github-mcp",
+    "priority": 0,
+    "active": false,
+    "match_tags": ["production"],
+    "rules": [
+      { "host": "mcp.github.com", "paths": ["/mcp", "/mcp/*"], "methods": ["POST"] }
+    ],
+    "tools": [
+      { "name": "search_code", "matchers": [{ "path": "repo", "equals": "console" }] }
+    ]
+  }'
+```
+
+## Delete an MCP Policy
+
+```http
+DELETE /v1/policies/mcp/:id
+```
+
+Returns `204 No Content`. Connected proxies stop applying the policy within seconds.

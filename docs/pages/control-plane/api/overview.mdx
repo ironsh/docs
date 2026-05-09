@@ -1,0 +1,88 @@
+---
+title: "API Overview"
+description: "Base URL, authentication, and conventions for the iron.sh control plane API."
+---
+
+# API Overview
+
+The control plane exposes a JSON API for managing policies, proxies, and other fleet resources. Anything you can do in the control plane UI under **Policies** is available over the API.
+
+## Base URL
+
+All API requests are made against the `api` subdomain of your control plane:
+
+```
+https://api.iron.sh/v1
+```
+
+Self-hosted deployments substitute their own host. The API path layout (`/v1/...`) is identical.
+
+## Authentication
+
+The API uses bearer tokens. Create an API key in the control plane UI under **API Keys**, then include it in the `Authorization` header on every request:
+
+```http
+Authorization: Bearer <your_api_key>
+```
+
+API keys are scoped to the organization that created them. Requests with a missing or invalid token return `401 Unauthorized`.
+
+## Content Type
+
+`POST`, `PUT`, and `PATCH` requests must send `Content-Type: application/json`. The API rejects other content types with `415 Unsupported Media Type`:
+
+```json
+{
+  "error": {
+    "code": "unsupported_media_type",
+    "message": "Content-Type must be application/json"
+  }
+}
+```
+
+## Identifiers
+
+Every resource is addressed by an opaque, prefixed ID. Network policies start with `npol_`, secret policies with `spol_`, and MCP policies with `mpol_`. Treat IDs as opaque strings: do not parse, generate, or assume anything about their format beyond the prefix.
+
+## Errors
+
+Errors return a JSON body with a stable `code` and a human-readable `message`:
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Name has already been taken"
+  }
+}
+```
+
+Common codes across policy endpoints:
+
+| Status | Code | Meaning |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid API key. |
+| 404 | `network_policy_not_found`, `secret_policy_not_found`, `mcp_policy_not_found` | The ID does not exist or belongs to a different organization. |
+| 409 | `network_policy_name_taken`, `secret_policy_name_taken`, `mcp_policy_name_taken` | A policy with that name already exists in the organization. |
+| 415 | `unsupported_media_type` | `Content-Type` is not `application/json`. |
+| 422 | `validation_error` | The request body failed validation. The `message` lists the failing fields. |
+
+## Server-Owned Fields
+
+The API ignores fields that are owned by the server: `id`, `organization_id`, `created_by_id`, `created_at`, `updated_at`. Sending them in `POST` or `PATCH` bodies is harmless: the values you supply are dropped and the server fills the canonical values in the response.
+
+## Listing and Filtering
+
+List endpoints return all matching resources in a single response under `data`, ordered by `priority` ascending:
+
+```json
+{ "data": [ { "id": "npol_...", "name": "default-egress", ... } ] }
+```
+
+Most list endpoints accept `name` and `active` query parameters as exact-match filters.
+
+## Resources
+
+- [Network Policies](/control-plane/api/network-policies)
+- [Secret Policies](/control-plane/api/secret-policies)
+- [MCP Policies](/control-plane/api/mcp-policies)
