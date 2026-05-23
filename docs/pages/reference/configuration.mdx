@@ -462,13 +462,16 @@ See the [GCP Service Accounts reference](/credential-proxying/gcp-auth) for a fu
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `keyfile_path` | string | | Path to a Google service account JSON keyfile on disk. Mutually exclusive with `keyfile`. |
-| `keyfile` | object | | Secret source that resolves to the keyfile JSON. Uses the same shape as a [secret source](#secret-sources). Mutually exclusive with `keyfile_path`. |
-| `subject` | string | | Workspace user email to impersonate via domain-wide delegation. When set, the minted token acts as the subject rather than the service account. |
+| `keyfile_path` | string | | Path to a Google service account JSON keyfile on disk. |
+| `keyfile` | object | | Secret source that resolves to the keyfile JSON. Uses the same shape as a [secret source](#secret-sources). |
+| `credentials_provider` | object | | Resolves credentials through the Google Cloud default chain (GKE Workload Identity, `GOOGLE_APPLICATION_CREDENTIALS`, Workload Identity Federation). See [Workload Identity](/credential-proxying/gcp-auth#workload-identity). |
+| `subject` | string | | Workspace user email to impersonate via domain-wide delegation. When set, the minted token acts as the subject rather than the service account. Incompatible with `credentials_provider`. |
 | `scopes` | string[] | **required** | OAuth2 scopes to request. Baked into the minted token. |
 | `rules` | object[] | `[]` | Restrict the transform to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). |
 
-Exactly one of `keyfile_path` or `keyfile` must be set.
+Exactly one of `keyfile_path`, `keyfile`, or `credentials_provider` must be set.
+
+`credentials_provider` accepts `{type: workload_identity}`. The proxy holds the rotating credentials minted by the cloud SDK; the workload runs against the stubbed metadata server as usual.
 
 ```yaml
 - name: gcp_auth
@@ -564,9 +567,10 @@ See the [AWS Request Signing reference](/credential-proxying/aws-auth) for a ful
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `access_key_id` | object | **required** | Secret source resolving to the real AWS access key ID. |
-| `secret_access_key` | object | **required** | Secret source resolving to the real AWS secret access key. |
+| `access_key_id` | object | | Secret source resolving to the real AWS access key ID. Required unless `credentials_provider` is set. |
+| `secret_access_key` | object | | Secret source resolving to the real AWS secret access key. Required unless `credentials_provider` is set. |
 | `session_token` | object | | Secret source resolving to a session token (STS, assumed roles). Omit for long-lived IAM users. |
+| `credentials_provider` | object | | Resolves credentials through the AWS SDK default chain (IRSA, EKS Pod Identity, IMDSv2). Mutually exclusive with `access_key_id`/`secret_access_key`. Accepts `{type: workload_identity, region?: string}`. See [Workload Identity](/credential-proxying/aws-auth#workload-identity). |
 | `allowed_regions` | string[] | any region | Allowlist of AWS regions. Requests with a credential scope outside this set are rejected with HTTP 403. |
 | `allowed_services` | string[] | any service | Allowlist of AWS services. Requests with a credential scope outside this set are rejected with HTTP 403. |
 | `unsigned_payload` | boolean | `false` | Send `UNSIGNED-PAYLOAD` as the payload hash instead of reading and hashing the body. Required for S3 multipart and similar streaming uploads. |

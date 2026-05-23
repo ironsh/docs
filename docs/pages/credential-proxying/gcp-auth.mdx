@@ -25,7 +25,7 @@ Under the hood, `gcp_auth` is an RFC 7523 JWT-bearer flow with Google's keyfile 
 
 ## How It Works
 
-1. **Keyfile resolution.** The service-account JSON loads either from disk (`keyfile_path`) or from any [secret source](/credential-proxying/overview#secret-sources) (`keyfile`). Set exactly one.
+1. **Credential resolution.** The service-account JSON loads either from disk (`keyfile_path`), from any [secret source](/credential-proxying/overview#secret-sources) (`keyfile`), or from the Google Cloud default credential chain (`credentials_provider`). Set exactly one. See [Workload Identity](#workload-identity) for the metadata-server path.
 2. **Token minting.** iron-proxy signs a JWT with the service account's RSA private key, posts it to Google's OAuth2 token endpoint as a `urn:ietf:params:oauth:grant-type:jwt-bearer` assertion, and receives a short-lived access token in exchange. Minting goes through `golang.org/x/oauth2/google`, the same code path the official Google Cloud SDKs use.
 3. **Caching and refresh.** Tokens are cached in memory until they near expiry, then refreshed in the background. Single-flight deduplication ensures concurrent requests share one mint.
 4. **Header injection.** When a request matches the entry's `rules`, iron-proxy sets `Authorization` to the cached or freshly minted bearer.
@@ -64,6 +64,27 @@ Set `subject` to impersonate a Google Workspace user. The minted token then acts
 ```
 
 The service account must be authorized in the Workspace Admin Console for the scopes it impersonates, and `subject` must be the email of a real Workspace user. Without delegation set up on the Google side, the token mint succeeds but every API call returns 403.
+
+`subject` is incompatible with `credentials_provider`: metadata-server credentials can't perform the JWT-bearer assertion that domain-wide delegation requires. Setting both is a configuration error and the proxy refuses to start.
+
+## Workload Identity
+
+On GKE, Cloud Run, or any environment with Application Default Credentials configured, you don't have to give iron-proxy a service-account JSON file. Set `credentials_provider` and the proxy resolves credentials through Google's default chain: GKE Workload Identity, `GOOGLE_APPLICATION_CREDENTIALS`, and Workload Identity Federation (for federated identities from AWS, Azure, or any OIDC provider).
+
+```yaml
+- name: gcp_auth
+  config:
+    credentials_provider:
+      type: workload_identity
+    scopes:
+      - "https://www.googleapis.com/auth/cloud-platform"
+    rules:
+      - host: "*.googleapis.com"
+```
+
+The proxy holds the rotating pod credentials. The workload talks to the proxy with the same `iron-proxy-stub-token` it would receive via metadata server stubbing, so real credentials never reach the agent even though the underlying identity is short-lived and federated.
+
+`credentials_provider` is mutually exclusive with `keyfile` and `keyfile_path`. Set exactly one.
 
 ## Examples
 
@@ -152,7 +173,8 @@ A mint failure annotates `error` and `rejected: token_unavailable`, and the requ
 
 ## Limitations
 
-- **Service-account keyfiles only.** `gcp_auth` uses `JWTConfigFromJSON`, which only accepts service-account JSON. Workload identity federation and `external_account` credential configurations aren't supported.
+- **Service-account keyfiles and ADC only.** Static credential configs must be service-account JSON (`JWTConfigFromJSON`). For Workload Identity Federation and other `external_account` configurations, use [`credentials_provider`](#workload-identity), which resolves through the Google Cloud default chain.
+- **Domain-wide delegation requires a keyfile.** `subject` is incompatible with `credentials_provider`. Metadata-server credentials can't perform the JWT-bearer assertion DWD needs.
 - **MITM mode only.** `sni-only` can't rewrite headers.
 - **One service account per entry.** Use multiple `gcp_auth` entries with non-overlapping `rules` to serve more than one.
 
