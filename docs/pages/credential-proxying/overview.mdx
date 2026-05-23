@@ -18,8 +18,8 @@ The right mechanism depends on what the upstream API expects.
 | A static API key, bearer token, or basic-auth password | [Static Secrets](/credential-proxying/static-secrets) | The literal credential value. |
 | An OAuth2 bearer minted from longer-lived credentials | [OAuth2 Token Injection](/credential-proxying/oauth-token) | A refresh token, client credentials, username/password, or RFC 7523 signing key. |
 | An HMAC signature over the outbound request | [HMAC Request Signing](/credential-proxying/hmac-sign) | The HMAC key and any auxiliary credentials the scheme requires. |
-| An AWS SigV4 signature | [AWS Request Signing](/credential-proxying/aws-auth) | An AWS access key, secret access key, and optional session token. |
-| A Google service-account access token | [GCP Service Accounts](/credential-proxying/gcp-auth) | The service-account JSON keyfile. |
+| An AWS SigV4 signature | [AWS Request Signing](/credential-proxying/aws-auth) | An AWS access key and secret, or AWS workload identity credentials. |
+| A Google service-account access token | [GCP Service Accounts](/credential-proxying/gcp-auth) | A service-account JSON keyfile, or GCP workload identity credentials. |
 
 The five are independent. One iron-proxy can use any combination, scoped to different hosts.
 
