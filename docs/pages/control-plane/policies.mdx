@@ -97,13 +97,13 @@ iron-proxy supports several backends here, including environment variables, AWS 
 
 ## Match Tags
 
-Match tags are how a policy is pinned to a subset of the fleet. A proxy is subject to a policy when it carries every tag in the policy's match set. A proxy can be matched by multiple policies at once, and their allowed rules combine.
+A policy is pinned to a subset of the fleet by its match tags. A proxy is subject to a policy when it carries every tag in the policy's match set. A proxy can be matched by multiple policies at once, and their allowed rules combine.
 
 Because tags are assigned at [enrollment](./enrollment), you can roll out a new policy without touching its match set: enroll hosts with the right tag and they inherit the policy automatically.
 
 ## Priority
 
-Priority only matters when two matching policies disagree about the same host and method. In that case, the policy with the lower priority number wins, so `priority: 1` beats `priority: 10`. Most fleets don't need priority tuning: start with the default and adjust only if you see policies stepping on each other.
+When two matching policies disagree about the same host and method, the policy with the lower priority number wins, so `priority: 1` beats `priority: 10`. Most fleets don't need priority tuning: start with the default and adjust only if you see policies stepping on each other.
 
 ## Per-User and Per-Tenant Policies
 

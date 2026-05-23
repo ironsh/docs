@@ -1,11 +1,11 @@
 ---
-title: Daytona Integration
+title: "Daytona Integration"
 description: "Run iron-proxy inside Daytona sandboxes using a custom Docker image for egress control."
 ---
 
 # Daytona Integration
 
-This guide walks through running iron-proxy inside [Daytona](https://www.daytona.io/) sandboxes. You will build a custom Docker image with iron-proxy pre-installed, then use Daytona's [declarative builder](https://www.daytona.io/docs/en/declarative-builder/) to launch sandboxes with egress control already configured.
+Run iron-proxy inside [Daytona](https://www.daytona.io/) sandboxes. You build a custom Docker image with iron-proxy pre-installed, then use Daytona's [declarative builder](https://www.daytona.io/docs/en/declarative-builder/) to launch sandboxes with egress control already configured.
 
 :::info
 Daytona [blocks most egress traffic by default](https://www.daytona.io/docs/network-limits#_top) depending on your billing tier. iron-proxy gives you granular control over which domains are accessible, TLS interception, and request logging on top of Daytona's built-in restrictions.

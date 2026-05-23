@@ -203,7 +203,7 @@ Every matched request adds structured fields under the transform trace:
 
 ## Multiple Instances
 
-You can define many judge transforms in a single configuration. Each entry is an independent instance: its own `name`, `prompt`, `rules`, provider, semaphore, and circuit breaker. A failing or slow judge does not affect the others.
+A single configuration can define many judge transforms. Each entry is an independent instance: its own `name`, `prompt`, `rules`, provider, semaphore, and circuit breaker. A failing or slow judge does not affect the others.
 
 ```yaml
 transforms:

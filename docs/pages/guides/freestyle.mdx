@@ -1,11 +1,11 @@
 ---
-title: Freestyle Integration
+title: "Freestyle Integration"
 description: "Run iron-proxy inside Freestyle VMs using pre-baked snapshots for fast, repeatable egress control."
 ---
 
 # Freestyle Integration
 
-This guide walks through running iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You will create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
+Run iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
 
 ## How It Works
 
@@ -326,7 +326,7 @@ The snapshot script trusts the CA system-wide and sets common runtime environmen
 
 ## Troubleshooting
 
-### iron-proxy service is not running
+### iron-proxy Service Is Not Running
 
 Check the service logs:
 
@@ -342,7 +342,7 @@ journalctl -u install-iron-proxy --no-pager -n 50
 
 Common causes: network issues during the iron-proxy binary download, or a version string that does not match a GitHub release.
 
-### DNS resolution fails
+### DNS Resolution Fails
 
 Verify that `/etc/resolv.conf` points at `127.0.0.1`:
 
@@ -352,6 +352,6 @@ cat /etc/resolv.conf
 
 If it was overwritten (e.g., by DHCP), the snapshot's `systemd-resolved` disable may not have taken effect. Re-run the snapshot creation.
 
-### TLS certificate errors
+### TLS Certificate Errors
 
 If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during snapshot creation, and ensure the appropriate environment variable is set for your runtime. See [CA Certificates](/reference/ca-certificates) for details.

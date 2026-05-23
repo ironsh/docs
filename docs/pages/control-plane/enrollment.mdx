@@ -63,7 +63,7 @@ Control-plane-managed fields (policy, secret mappings, tags) are refreshed from 
 
 ## Tags
 
-Tags are colon-separated labels that identify a proxy and its workload. They can be bare strings like `dev` or namespaced like `env:prod`. Every audit event is indexed by the proxy's tags, so fleet-wide queries like "show every request from `env:prod` `service:checkout`" are cheap.
+Each proxy carries a set of colon-separated labels that identify it and its workload. Tags can be bare strings like `dev` or namespaced like `env:prod`. Every audit event is indexed by the proxy's tags, so fleet-wide queries like "show every request from `env:prod` `service:checkout`" are cheap.
 
 Tags are configured on the enrollment token in the control plane UI. Every proxy registered with the token inherits that tag set.
 
@@ -71,7 +71,7 @@ Changing a proxy's tags after enrollment is not yet exposed in the UI. For now, 
 
 ## Enrollment Tokens
 
-Enrollment tokens are short-lived credentials that authorize enrollment. They exist only for the handshake. Once the proxy has its long-lived credential, the token is discarded.
+Each enrollment is authorized by a short-lived credential that exists only for the handshake. Once the proxy has its long-lived credential, the token is discarded.
 
 `Max Uses` controls how many proxies a single token can register:
 
