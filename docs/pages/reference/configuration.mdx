@@ -293,6 +293,8 @@ Each rule matches a single host or CIDR, with optional method and path filters. 
 
 Injects or replaces secret values at the egress boundary so that real credentials are never exposed to sandboxed workloads. Each secret declares its own source and either an `inject` or `replace` block.
 
+See the [Static Secrets reference](/credential-proxying/static-secrets) for a full overview of inject and replace modes, secret sources, and credential rotation. The fields below are the canonical schema.
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `secrets` | object[] | `[]` | List of secret entries. See below. |
@@ -301,12 +303,14 @@ Injects or replaces secret values at the egress boundary so that real credential
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `source` | object | **required** | Where to read the secret value. Contains a `type` field (`env`, `aws_sm`, `aws_ssm`, or `1password`) plus type-specific fields. See [sources](#secret-sources) below. |
+| `source` | object | **required** | Where to read the secret value. Contains a `type` field (`env`, `aws_sm`, `aws_ssm`, `1password`, or `1password_connect`) plus type-specific fields. See [sources](#secret-sources) below. |
 | `inject` | object | | Inject the secret onto matching requests unconditionally. See [inject mode](#inject-mode). Mutually exclusive with `replace`. |
 | `replace` | object | | Replace a proxy token with the real value. See [replace mode](#replace-mode). Mutually exclusive with `inject`. |
 | `rules` | object[] | `[]` | Restrict this secret to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). If empty, the secret applies to all destinations. |
 
 #### Secret Sources
+
+Every source supports an optional `json_key` field. When set, the resolved value is parsed as JSON and the named field is extracted before use. This works with all source types (`env`, `aws_sm`, `aws_ssm`, `1password`, `1password_connect`) and is useful for pulling individual fields out of a single shared JSON secret.
 
 ##### `env`
 
@@ -316,6 +320,7 @@ Read the secret from an environment variable on the iron-proxy process.
 |---|---|---|
 | `type` | string | Must be `env`. |
 | `var` | string | Environment variable name containing the real secret value. |
+| `json_key` | string | Optional. When set, parse the value as JSON and extract this field. |
 
 ```yaml
 source:
@@ -369,13 +374,14 @@ iron-proxy uses the standard AWS credential chain (environment variables, instan
 
 ##### `1password`
 
-Read the secret from 1Password using a service account token. Like the AWS sources, values are cached and refreshed in the background based on the TTL.
+Read the secret from 1Password using a service account token. Like the AWS sources, values are cached and refreshed in the background based on the TTL. For most deployments, prefer [`1password_connect`](#1password_connect): the hosted SDK service applies per-account rate limits that can stall request handling under load.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | string | | Must be `1password`. |
 | `secret_ref` | string | **required** | 1Password reference using the `op://vault/item/[section/]field` syntax. |
 | `token_env` | string | `OP_SERVICE_ACCOUNT_TOKEN` | Environment variable holding the 1Password service account token. |
+| `json_key` | string | | When set, parse the fetched value as JSON and extract this field. |
 | `ttl` | duration | `0` (no refresh) | Re-fetch interval. Set to `0` to read the value once at startup. |
 
 ```yaml
@@ -386,13 +392,35 @@ source:
   ttl: 15m
 ```
 
+##### `1password_connect`
+
+Read the secret from a 1Password Connect server running in your own infrastructure. This is the recommended 1Password integration: Connect runs locally and avoids the per-account rate limits that the hosted SDK enforces. Values are cached and refreshed in the background based on the TTL.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | | Must be `1password_connect`. |
+| `secret_ref` | string | **required** | 1Password reference using the `op://vault/item/[section/]field` syntax. |
+| `host_env` | string | `OP_CONNECT_HOST` | Environment variable holding the Connect server URL. |
+| `token_env` | string | `OP_CONNECT_TOKEN` | Environment variable holding the Connect API token. |
+| `json_key` | string | | When set, parse the fetched value as JSON and extract this field. |
+| `ttl` | duration | `0` (no refresh) | Re-fetch interval. Set to `0` to read the value once at startup. |
+
+```yaml
+source:
+  type: 1password_connect
+  secret_ref: "op://Engineering/OpenAI/credential"
+  host_env: OP_CONNECT_HOST
+  token_env: OP_CONNECT_TOKEN
+  ttl: 15m
+```
+
 #### Inject Mode
 
 In inject mode, the proxy unconditionally sets a header or query parameter on every request that matches the secret's rules. The workload never sees or sends any credential. This is useful when sandboxed workloads should have no knowledge of credentials at all.
 
 | Field | Type | Description |
 |---|---|---|
-| `header` | string | Header name to set on matching requests. Mutually exclusive with `query_param`. |
+| `header` | string | Header name to set on matching requests. Sent upstream with the exact casing written here (HTTP/1.x only: HTTP/2 lowercases header names regardless). Mutually exclusive with `query_param`. |
 | `query_param` | string | Query parameter name to set on matching requests. Mutually exclusive with `header`. |
 | `formatter` | string | Go template for the header value. Receives `.Value` (the resolved secret) and a `base64` helper. Not used with `query_param`. |
 
@@ -411,17 +439,217 @@ inject:
 
 #### Replace Mode
 
-In replace mode, the workload sends a proxy token that the proxy swaps for the real value before forwarding upstream. Query parameters are always scanned for proxy tokens.
+In replace mode, the workload sends a proxy token that the proxy swaps for the real value before forwarding upstream.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `proxy_value` | string | **required** | Token that the sandboxed environment sends. The proxy replaces this with the real value before forwarding. |
-| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. Each entry is either a literal header name (case-insensitive) or a `/regex/` pattern compiled at config time as a case-insensitive regular expression matched against canonical header names. Literal and regex entries can be mixed. |
+| `match_headers` | string[] | `[]` | Header names to scan for the proxy token. An empty list scans all headers. Each entry is either a literal header name (case-insensitive) or a `/regex/` pattern compiled at config time as a case-insensitive regular expression matched against canonical header names. Literal and regex entries can be mixed. Headers are forwarded upstream with the exact casing written here (HTTP/1.x only: HTTP/2 lowercases header names regardless). |
 | `match_body` | boolean | `false` | When `true`, scan the request body for the proxy token. |
 | `match_path` | boolean | `false` | When `true`, scan `req.URL.Path` for the proxy token and swap in the resolved secret. Off by default because URL paths often appear in access logs on either side of the proxy. |
+| `match_query` | boolean | `false` | When `true`, scan the URL query string for the proxy token and swap in the resolved secret. Off by default because query strings often appear in access logs. |
 | `require` | boolean | `false` | When `true`, requests matching a configured rule are rejected with HTTP 403 if the proxy token is not present in any scanned location. Prevents workloads from bypassing secret management. |
 
-The `proxy_value`, `match_headers`, `match_body`, `match_path`, and `require` fields may also be set at the top level of a secret entry for backwards compatibility. New configurations should use the `replace` block.
+The `proxy_value`, `match_headers`, `match_body`, `match_path`, `match_query`, and `require` fields may also be set at the top level of a secret entry for backwards compatibility. New configurations should use the `replace` block.
+
+### `gcp_auth`
+
+Mints short-lived GCP OAuth2 access tokens from a service account keyfile and injects them as `Authorization: Bearer` on matching requests. Token minting, caching, and refresh are handled automatically. Requires MITM mode.
+
+iron-proxy also stubs Google's OAuth2 token endpoints (`oauth2.googleapis.com/token` and the GCE/GKE metadata server's service-account token endpoints) so client SDKs that complete their own token dance reach the proxy with a placeholder token. The real token is minted separately and swapped onto the upstream API call.
+
+See the [GCP Service Accounts reference](/credential-proxying/gcp-auth) for a full overview, including keyfile sourcing, domain-wide delegation, and metadata server stubbing.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `keyfile_path` | string | | Path to a Google service account JSON keyfile on disk. Mutually exclusive with `keyfile`. |
+| `keyfile` | object | | Secret source that resolves to the keyfile JSON. Uses the same shape as a [secret source](#secret-sources). Mutually exclusive with `keyfile_path`. |
+| `subject` | string | | Workspace user email to impersonate via domain-wide delegation. When set, the minted token acts as the subject rather than the service account. |
+| `scopes` | string[] | **required** | OAuth2 scopes to request. Baked into the minted token. |
+| `rules` | object[] | `[]` | Restrict the transform to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). |
+
+Exactly one of `keyfile_path` or `keyfile` must be set.
+
+```yaml
+- name: gcp_auth
+  config:
+    keyfile:
+      type: aws_sm
+      secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gcp-sa-key"
+    subject: "user@workspace.example.com"
+    scopes:
+      - "https://www.googleapis.com/auth/cloud-platform"
+    rules:
+      - host: "*.googleapis.com"
+```
+
+### `oauth_token`
+
+Mints short-lived OAuth2 access tokens and injects them as `Authorization: Bearer` on matching requests. Each entry under `tokens` declares a grant type, its credential fields, and the hosts it applies to. Token exchange, caching, refresh, and single-flight deduplication are handled automatically. Requires MITM mode. If token minting fails the request is rejected with HTTP 502.
+
+Each configured `token_endpoint` is also stubbed, so sandboxed client SDKs can complete their own OAuth2 handshake against the proxy with a placeholder token while the proxy injects the real one upstream.
+
+See the [OAuth2 Token Injection reference](/credential-proxying/oauth-token) for a full overview, including per-vendor recipes (DocuSign, Salesforce, Box, Zoom, Gmail, AlphaSense) and credential rotation behavior.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tokens` | object[] | **required** | List of token entries. At least one is required. See below. |
+
+#### `oauth_token.tokens[]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `grant` | string | **required** | One of `refresh_token`, `client_credentials`, `password`, `jwt_bearer`. |
+| `token_endpoint` | string | **required** | URL the proxy POSTs to in order to exchange credentials for an access token. Also stubbed for client-side token requests. |
+| `scopes` | string[] | `[]` | OAuth2 scopes requested at the token endpoint. |
+| `rules` | object[] | **required** | Destinations this entry applies to. Uses the same format as [`allowlist.rules[]`](#allowlistrules). At least one rule is required. |
+| `header` | string | `Authorization` | Header to set on matching requests. |
+| `value_prefix` | string | `Bearer ` | Prefix prepended to the token in the injected header value. |
+| `token_endpoint_headers` | object | | Map of header name to secret source. Each resolved value is sent on the token POST itself, for vendors that require an API key alongside the standard form-body client auth. Header casing is preserved on the wire. |
+
+Required credential fields depend on the grant:
+
+| Grant | Required credentials | Optional credentials | Other required |
+|---|---|---|---|
+| `refresh_token` | `refresh_token`, `client_id` | `client_secret` | |
+| `client_credentials` | `client_id`, `client_secret` | | |
+| `password` | `username`, `password`, `client_id` | `client_secret` | |
+| `jwt_bearer` | `issuer`, `subject`, `private_key` | `private_key_id` | `audience` |
+
+Each credential field is a discrete [secret source](#secret-sources). `private_key` for `jwt_bearer` must resolve to a PEM-encoded RSA private key; `private_key_id`, when set, is emitted as the JWT `kid` header.
+
+For Google service-account auth, use the [`gcp_auth`](#gcp_auth) transform instead: it wraps the same JWT-bearer flow with Google's keyfile format.
+
+```yaml
+- name: oauth_token
+  config:
+    tokens:
+      - grant: refresh_token
+        refresh_token:
+          type: aws_sm
+          secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+          json_key: "refresh_token"
+        client_id:
+          type: aws_sm
+          secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+          json_key: "client_id"
+        client_secret:
+          type: aws_sm
+          secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+          json_key: "client_secret"
+        token_endpoint: "https://oauth2.googleapis.com/token"
+        scopes:
+          - "https://www.googleapis.com/auth/gmail.readonly"
+        rules:
+          - host: "gmail.googleapis.com"
+
+      - grant: jwt_bearer
+        issuer:  {type: env, var: DOCUSIGN_INTEGRATION_KEY}
+        subject: {type: env, var: DOCUSIGN_USER_GUID}
+        private_key:
+          type: aws_sm
+          secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:docusign-private-key"
+        audience: "account.docusign.com"
+        token_endpoint: "https://account.docusign.com/oauth/token"
+        scopes: ["signature", "impersonation"]
+        rules:
+          - host: "*.docusign.net"
+```
+
+### `aws_auth`
+
+Re-signs inbound AWS SigV4 requests with real credentials. The workload's AWS SDK signs with placeholders; iron-proxy reads the region and service from the inbound credential scope and re-signs with real credentials drawn from any [secret source](#secret-sources). One config entry covers every AWS service the client speaks to. Requires MITM mode.
+
+See the [AWS Request Signing reference](/credential-proxying/aws-auth) for a full overview, including scope gating, body handling modes, and worked examples.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `access_key_id` | object | **required** | Secret source resolving to the real AWS access key ID. |
+| `secret_access_key` | object | **required** | Secret source resolving to the real AWS secret access key. |
+| `session_token` | object | | Secret source resolving to a session token (STS, assumed roles). Omit for long-lived IAM users. |
+| `allowed_regions` | string[] | any region | Allowlist of AWS regions. Requests with a credential scope outside this set are rejected with HTTP 403. |
+| `allowed_services` | string[] | any service | Allowlist of AWS services. Requests with a credential scope outside this set are rejected with HTTP 403. |
+| `unsigned_payload` | boolean | `false` | Send `UNSIGNED-PAYLOAD` as the payload hash instead of reading and hashing the body. Required for S3 multipart and similar streaming uploads. |
+| `allow_chunked_body` | boolean | `false` | Sign chunked-encoding bodies without length verification. |
+| `rules` | object[] | **required** | Destinations this transform applies to. Uses the same format as [`allowlist.rules[]`](#allowlistrules). At least one rule is required. |
+
+```yaml
+- name: aws_auth
+  config:
+    access_key_id:     {type: env, var: AWS_ACCESS_KEY_ID}
+    secret_access_key: {type: env, var: AWS_SECRET_ACCESS_KEY}
+    allowed_regions:   ["us-east-1", "eu-west-1"]
+    allowed_services:  ["bedrock", "s3", "dynamodb"]
+    rules:
+      - host: "*.amazonaws.com"
+```
+
+### `hmac_sign`
+
+Signs outbound requests with HMAC before forwarding them upstream. Computes a signature over a Go-template message derived from the request and injects the signature plus any auxiliary credentials into a configurable set of headers. The four signature enums (`algorithm`, `key_encoding`, `output_encoding`, `timestamp.format`) plus the message template cover most signing schemes. Requires MITM mode.
+
+See the [HMAC Request Signing reference](/credential-proxying/hmac-sign) for a full overview, including template variable details, body integrity rules, and worked examples.
+
+Because a truncated body would produce an invalid signature, the transform enforces body integrity:
+
+- Bodies whose buffered length falls short of `Content-Length` (truncated by `proxy.max_request_body_bytes`) are rejected with HTTP 413.
+- Chunked bodies are rejected with HTTP 400 unless `allow_chunked_body: true`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timestamp.format` | string | **required** | One of `unix_seconds`, `unix_millis`, `unix_nanos`, `rfc3339`. |
+| `signature.algorithm` | string | **required** | HMAC hash. One of `sha256`, `sha512`, `sha1`. |
+| `signature.key_encoding` | string | **required** | Encoding of the HMAC key before keying. One of `raw`, `base64`, `hex`. |
+| `signature.output_encoding` | string | **required** | Encoding of the computed signature. One of `base64`, `hex`. |
+| `signature.message` | string | **required** | Go template for the signed message. Available fields: `.Timestamp`, `.Method`, `.Path`, `.PathWithQuery`, `.Query`, `.Host`, `.Body`. |
+| `credentials` | object | **required** | Map of credential name to [secret source](#secret-sources). Must include `secret` (the HMAC key). Other entries are addressable from header templates as `.Credentials.<name>`. |
+| `headers` | object[] | **required** | Ordered list of `{name, value}` entries to inject. `value` is a Go template with `.Timestamp`, `.Signature`, and `.Credentials.<name>` available. Header casing is preserved on the wire. |
+| `allow_chunked_body` | boolean | `false` | Opt in to signing chunked-encoding bodies. |
+| `rules` | object[] | **required** | Destinations this transform applies to. At least one rule is required. |
+
+```yaml
+- name: hmac_sign
+  config:
+    timestamp:
+      format: unix_seconds
+    signature:
+      algorithm: sha256
+      key_encoding: base64
+      output_encoding: base64
+      message: "{{.Timestamp}}{{.Method}}{{.PathWithQuery}}{{.Body}}"
+    credentials:
+      key:        {type: env, var: FALCONX_API_KEY}
+      secret:     {type: env, var: FALCONX_SECRET}
+      passphrase: {type: env, var: FALCONX_PASSPHRASE}
+    headers:
+      - {name: "FX-ACCESS-KEY",        value: "{{.Credentials.key}}"}
+      - {name: "FX-ACCESS-SIGN",       value: "{{.Signature}}"}
+      - {name: "FX-ACCESS-TIMESTAMP",  value: "{{.Timestamp}}"}
+      - {name: "FX-ACCESS-PASSPHRASE", value: "{{.Credentials.passphrase}}"}
+    rules:
+      - host: "api.falconx.io"
+```
+
+### `body_capture`
+
+Records decoded request bodies of matching requests onto the audit log under `body_capture.request_body` (and `body_capture.request_body_truncated` when the body exceeds the cap). Observation-only: it never rejects a request, and read errors are annotated on the trace rather than failing the request. Response bodies are not captured.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_request_body_bytes` | integer | `16384` (16 KiB) | Per-request capture cap. Bodies larger than this are truncated to the prefix and `request_body_truncated` is set to `true`. Independent of `proxy.max_request_body_bytes`. |
+| `rules` | object[] | `[]` | Restrict capture to specific destinations. Uses the same format as [`allowlist.rules[]`](#allowlistrules). |
+
+```yaml
+- name: body_capture
+  config:
+    max_request_body_bytes: 16384
+    rules:
+      - host: "api.anthropic.com"
+        methods: ["POST"]
+        paths: ["/v1/messages"]
+```
+
+When `secrets` runs with `match_body: true`, place `body_capture` before `secrets` so the audit log records the workload's proxy tokens rather than the real credentials swapped in.
 
 ### `annotate`
 

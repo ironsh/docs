@@ -1,0 +1,84 @@
+---
+title: "Credential Proxying"
+description: "iron-proxy holds the credentials your workloads need so the workloads themselves don't have to. Pick the strategy that matches your upstream's auth scheme."
+---
+
+# Credential Proxying
+
+iron-proxy holds the credentials your workloads use to call upstream APIs, so the workloads never see the real values.
+
+Containers, CI jobs, and agents send unauthenticated requests (or requests carrying a placeholder token). The proxy attaches the real credential as the request leaves your network. If a workload is compromised, there is no real credential to steal.
+
+The right mechanism depends on what the upstream API expects.
+
+## Picking A Strategy
+
+| Upstream expects | Use | What the proxy holds |
+|---|---|---|
+| A static API key, bearer token, or basic-auth password | [Static Secrets](/credential-proxying/static-secrets) | The literal credential value. |
+| An OAuth2 bearer minted from longer-lived credentials | [OAuth2 Token Injection](/credential-proxying/oauth-token) | A refresh token, client credentials, username/password, or RFC 7523 signing key. |
+| An HMAC signature over the outbound request | [HMAC Request Signing](/credential-proxying/hmac-sign) | The HMAC key and any auxiliary credentials the scheme requires. |
+| An AWS SigV4 signature | [AWS Request Signing](/credential-proxying/aws-auth) | An AWS access key, secret access key, and optional session token. |
+| A Google service-account access token | [GCP Service Accounts](/credential-proxying/gcp-auth) | The service-account JSON keyfile. |
+
+The five are independent. One iron-proxy can use any combination, scoped to different hosts.
+
+## Common Concepts
+
+Every credential proxying mechanism shares the same scaffolding.
+
+### Secret Sources
+
+You never put a credential value directly in the YAML config. Each credential field is a "secret source" object: a backend type plus a lookup key. iron-proxy reads the value at startup and caches it in memory. Five backends are supported:
+
+| Type | Reads from |
+|---|---|
+| `env` | An environment variable on the iron-proxy process. |
+| `aws_sm` | AWS Secrets Manager. |
+| `aws_ssm` | AWS Systems Manager Parameter Store. |
+| `1password_connect` | A 1Password Connect server you run. Recommended for 1Password. |
+| `1password` | 1Password's hosted SDK. Rate-limited per account. |
+
+Every source supports two optional fields:
+
+- `json_key`: when set, the value is parsed as JSON and the named field is extracted. Use this to pack a `client_id` and `client_secret` into one Secrets Manager entry.
+- `ttl`: when non-zero, iron-proxy re-reads the value on that interval. Rotate a credential in the backing store and the proxy picks it up on the next refresh, no restart required.
+
+See [Static Secrets / Secret Sources](/credential-proxying/static-secrets#secret-sources) for the full field reference.
+
+### Host Rules
+
+Every mechanism scopes itself with a `rules` list matching outbound requests by host, method, and path. Rules use the same shape as the [allowlist](/reference/configuration#allowlistrules). Scope credentials to the narrowest set of destinations that work. A credential that applies to every host leaks the moment a workload makes an unrelated request.
+
+### MITM Mode
+
+All four mechanisms rewrite request headers, so iron-proxy has to terminate TLS. Use `tls.mode: mitm` (the default) and make sure workloads trust the proxy's CA. `sni-only` mode passes TLS through unmodified and cannot do credential proxying.
+
+### Fail-Closed Behavior
+
+When a credential can't be resolved or a token can't be minted, iron-proxy closes the request rather than forwarding it unauthenticated:
+
+- `secrets` rejects with HTTP 403 if `require: true` and the workload didn't send the proxy token.
+- `oauth_token` rejects with HTTP 502 if token minting fails.
+- `hmac_sign` rejects with HTTP 400, 413, or 502 depending on the failure.
+- `aws_auth` rejects with HTTP 400, 403, 413, 500, or 502 depending on the failure.
+- `gcp_auth` rejects with HTTP 403 if token minting fails.
+
+The audit log carries the reason on every rejection.
+
+### Pipeline Ordering
+
+Credential proxying transforms run top-to-bottom in the order they appear under `transforms:`. Two rules matter most:
+
+- Put credential injection **after** any policy transform (`judge`, `mcp`, `body_capture`) that should see proxy tokens, not real credentials.
+- Put [`header_allowlist`](/reference/configuration#header_allowlist) **after** credential injection so injected headers survive the allowlist.
+
+When two credential transforms target the same host, the first one in config order wins.
+
+## Next
+
+- [Static Secrets](/credential-proxying/static-secrets): inject and replace patterns for API keys and tokens.
+- [OAuth2 Token Injection](/credential-proxying/oauth-token): the four OAuth2 grants, token endpoint stubbing, vendor recipes.
+- [HMAC Request Signing](/credential-proxying/hmac-sign): template variables, body integrity, signing scheme examples.
+- [AWS Request Signing](/credential-proxying/aws-auth): re-sign AWS SDK requests with real credentials.
+- [GCP Service Accounts](/credential-proxying/gcp-auth): service-account JWT-bearer flow with metadata-server stubbing.

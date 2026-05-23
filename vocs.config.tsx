@@ -133,12 +133,23 @@ export default defineConfig({
       ],
     },
     {
+      text: "Credential Proxying",
+      collapsed: false,
+      items: [
+        { text: "Overview", link: "/credential-proxying/overview" },
+        { text: "Static Secrets", link: "/credential-proxying/static-secrets" },
+        { text: "OAuth2 Token Injection", link: "/credential-proxying/oauth-token" },
+        { text: "HMAC Request Signing", link: "/credential-proxying/hmac-sign" },
+        { text: "AWS Request Signing", link: "/credential-proxying/aws-auth" },
+        { text: "GCP Service Accounts", link: "/credential-proxying/gcp-auth" },
+      ],
+    },
+    {
       text: "Reference",
       collapsed: false,
       items: [
         { text: "Deployment Methods", link: "/reference/deployment-methods" },
         { text: "Configuration", link: "/reference/configuration" },
-        { text: "Secret Proxying", link: "/reference/secret-proxying" },
         { text: "LLM Judge", link: "/reference/llm-judge" },
         { text: "MCP Interception", link: "/reference/mcp-interception" },
         { text: "CA Certificates", link: "/reference/ca-certificates" },

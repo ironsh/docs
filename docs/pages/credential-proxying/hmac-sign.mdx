@@ -1,0 +1,174 @@
+---
+title: "HMAC Request Signing"
+description: "How iron-proxy signs outbound requests with HMAC on behalf of workloads."
+---
+
+# HMAC Request Signing
+
+The `hmac_sign` transform signs outbound requests with HMAC and injects the signature into the headers the upstream expects.
+
+```yaml
+- name: hmac_sign
+  config:
+    timestamp:
+      format: unix_seconds
+    signature:
+      algorithm: sha256
+      key_encoding: base64
+      output_encoding: base64
+      message: "{{.Timestamp}}{{.Method}}{{.PathWithQuery}}{{.Body}}"
+    credentials:
+      secret: {type: env, var: API_SECRET}
+    headers:
+      - {name: "X-Signature", value: "{{.Signature}}"}
+      - {name: "X-Timestamp", value: "{{.Timestamp}}"}
+    rules:
+      - host: "api.example.com"
+```
+
+iron-proxy holds the HMAC key, computes the signature over a message template you configure, and adds the result to a set of headers. The workload sends an unsigned request; the proxy attaches the signature on the way out. Requires MITM mode.
+
+## How It Works
+
+For each matching request:
+
+1. **Body buffering.** iron-proxy reads the request body in full. If it falls short of `Content-Length` or arrives chunked, the request is rejected before any signing happens. See [Body Integrity](#body-integrity).
+2. **Credential resolution.** Each entry under `credentials` is its own [secret source](/credential-proxying/static-secrets#secret-sources). The entry named `secret` is required and holds the HMAC key. All other entries are user-named and available to header templates as `.Credentials.<name>`.
+3. **Timestamp.** iron-proxy generates a timestamp in the configured `timestamp.format` (`unix_seconds`, `unix_millis`, `unix_nanos`, `rfc3339`). The same value is passed to both the message template and the header templates as `.Timestamp`.
+4. **Signature.** The proxy renders `signature.message` into a string, decodes the HMAC key according to `signature.key_encoding` (`raw`, `base64`, `hex`), HMACs the message with `signature.algorithm` (`sha256`, `sha512`, `sha1`), and encodes the result with `signature.output_encoding` (`base64`, `hex`). The encoded signature is available to header templates as `.Signature`.
+5. **Header injection.** Each entry under `headers` is rendered as a Go template and set on the request in declaration order. Header names go on the wire with the exact casing written in config (HTTP/1.x only: HTTP/2 lowercases header names regardless).
+
+## Template Variables
+
+### `signature.message`
+
+The message template receives a struct with these fields:
+
+| Field | Description |
+|---|---|
+| `.Timestamp` | The formatted timestamp string. |
+| `.Method` | HTTP method (`GET`, `POST`, etc.). |
+| `.Path` | URL path only, no query string. |
+| `.PathWithQuery` | `path?query` when a query string is present, otherwise the path on its own. |
+| `.Query` | Raw query string (no leading `?`). Empty when absent. |
+| `.Host` | Request host with any port stripped. |
+| `.Body` | The full request body as a string. Empty for bodyless requests. |
+
+Templates use Go `text/template` syntax with `missingkey=error`. Referencing an unknown field is a config-time parse error.
+
+### `headers[].value`
+
+Each header value template receives:
+
+| Field | Description |
+|---|---|
+| `.Timestamp` | The same timestamp used to build the signature. |
+| `.Signature` | The computed signature, encoded per `signature.output_encoding`. |
+| `.Credentials.<name>` | Any credential resolved under `credentials`, keyed by its config name. |
+
+The `secret` credential (the HMAC key) is also available as `.Credentials.secret` if you need to send it in a header, though most signing schemes do not require this.
+
+## Body Integrity
+
+A truncated body produces a signature the upstream rejects, and that's harder to debug than a clean proxy-side rejection. `hmac_sign` enforces two rules before computing the signature:
+
+- **Buffered length must equal `Content-Length`.** If the proxy's `proxy.max_request_body_bytes` truncated the body, the request is rejected with HTTP 413 and `rejected: body_truncated`. If you sign large bodies, raise `proxy.max_request_body_bytes` accordingly.
+- **Chunked bodies are rejected by default.** Without a `Content-Length`, the proxy can't prove the buffered body matches what the client sent. Rejected with HTTP 400 and `rejected: chunked_body_not_allowed`. Set `allow_chunked_body: true` to opt in. iron-proxy logs a warning per signed chunked request and signs the buffered body as-is.
+
+Other failure modes:
+
+| Reason | Status | When |
+|---|---|---|
+| `credential_unavailable` | 502 | A credential's secret source returned an error (e.g., AWS Secrets Manager rate-limited). |
+| `key_decode_failed` | 500 | The HMAC key didn't decode under the configured `key_encoding`. |
+| `message_template_failed` | 500 | The `signature.message` template failed to execute against a real request. |
+| `header_template_failed` | 500 | One of the `headers[].value` templates failed to execute. |
+| `body_read_failed` | 400 | The proxy couldn't read the body off the inbound socket. |
+| `body_missing` | 400 | The request declared `Content-Length > 0` but the body was empty or absent. |
+
+## Building A Signing Config
+
+Most HMAC signing schemes reduce to the same five choices. To configure `hmac_sign` for a new API:
+
+1. **Timestamp format.** Check the API's signing docs. Most use Unix seconds or milliseconds. RFC 3339 is the third common option.
+2. **Hash algorithm.** `sha256` is dominant. `sha512` and `sha1` are also supported.
+3. **Key and signature encodings.** Keys usually arrive base64 or hex encoded. Signatures are usually emitted base64 or hex. The defaults match most APIs.
+4. **String to sign.** Look up the API's "string to sign" or "prehash" definition and translate it into a Go template using `.Timestamp`, `.Method`, `.Path`, `.PathWithQuery`, `.Query`, `.Host`, `.Body`. Reference auxiliary credentials with `.Credentials.<name>` if they appear in the prehash.
+5. **Headers.** Anything the API wants alongside the signature (API key, passphrase, client ID, the signature, the timestamp) becomes a `credentials` entry plus a `headers` entry that interpolates it.
+
+If the API also wants a static header that isn't part of the signature or any HMAC credential, inject it with a separate [`secrets`](/credential-proxying/static-secrets) entry rather than packing it into `hmac_sign`.
+
+## Examples
+
+### Signature Over Timestamp, Method, Path, Body
+
+A common scheme: HMAC-SHA256 over `timestamp + method + path + body`. Key base64-encoded, signature base64-encoded, signature sent in a request header alongside the timestamp and an API key.
+
+```yaml
+- name: hmac_sign
+  config:
+    timestamp:
+      format: unix_seconds
+    signature:
+      algorithm: sha256
+      key_encoding: base64
+      output_encoding: base64
+      message: "{{.Timestamp}}{{.Method}}{{.PathWithQuery}}{{.Body}}"
+    credentials:
+      key:        {type: env, var: API_KEY}
+      secret:     {type: env, var: API_SECRET}
+      passphrase: {type: env, var: API_PASSPHRASE}
+    headers:
+      - {name: "X-ACCESS-KEY",        value: "{{.Credentials.key}}"}
+      - {name: "X-ACCESS-SIGN",       value: "{{.Signature}}"}
+      - {name: "X-ACCESS-TIMESTAMP",  value: "{{.Timestamp}}"}
+      - {name: "X-ACCESS-PASSPHRASE", value: "{{.Credentials.passphrase}}"}
+    rules:
+      - host: "api.example.com"
+```
+
+### Credential Mixed Into The Prehash
+
+Some schemes mix the access key into the string to sign. Reference the credential from the message template:
+
+```yaml
+- name: hmac_sign
+  config:
+    timestamp:
+      format: unix_seconds
+    signature:
+      algorithm: sha256
+      key_encoding: raw
+      output_encoding: hex
+      message: "{{.Timestamp}}{{.Method}}{{.Path}}{{.Credentials.key}}{{.Body}}"
+    credentials:
+      key:    {type: env, var: API_KEY}
+      secret: {type: env, var: API_SECRET}
+    headers:
+      - {name: "X-Access-Key",  value: "{{.Credentials.key}}"}
+      - {name: "X-Signature",   value: "{{.Signature}}"}
+      - {name: "X-Timestamp",   value: "{{.Timestamp}}"}
+    rules:
+      - host: "api.example.com"
+```
+
+## Audit Log
+
+A successful signing produces:
+
+- `injected`: the headers that were set, e.g. `["header:X-ACCESS-KEY", "header:X-ACCESS-SIGN", ...]`.
+
+A rejection annotates `rejected` with one of the reasons from the [body integrity](#body-integrity) table, plus contextual fields (`content_length`, `buffered_length`, `credential`, `header`, `error`) as appropriate.
+
+## Limitations
+
+- **MITM mode only.** `sni-only` has no method, path, or body to sign.
+- **No response signing.** `hmac_sign` only signs outbound requests. Response verification belongs in the workload or a downstream transform.
+- **No request mutation.** The buffered body is replayed unchanged to the upstream. If you need to rewrite the body before signing (canonicalize JSON, for example), do it in a separate transform earlier in the pipeline.
+
+## Related
+
+- [AWS Request Signing](/credential-proxying/aws-auth): purpose-built signing for AWS SigV4 (use this for AWS, not `hmac_sign`).
+- [OAuth2 Token Injection](/credential-proxying/oauth-token): bearer-token auth when the upstream expects OAuth2 instead of HMAC.
+- [Static Secrets](/credential-proxying/static-secrets): inject static headers the API wants alongside the signature.
+- [Configuration reference](/reference/configuration#hmac_sign): the canonical schema for the `hmac_sign` transform.
