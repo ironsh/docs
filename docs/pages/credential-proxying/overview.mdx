@@ -68,14 +68,14 @@ The audit log carries the reason on every rejection.
 
 ### Pipeline Ordering
 
-Credential proxying transforms run top-to-bottom in the order they appear under `transforms:`. Two rules matter most:
+Transforms run top-to-bottom in the order they appear under `transforms:`. Two rules matter most:
 
 - Put credential injection **after** any policy transform (`judge`, `mcp`, `body_capture`) that should see proxy tokens, not real credentials.
 - Put [`header_allowlist`](/reference/configuration#header_allowlist) **after** credential injection so injected headers survive the allowlist.
 
 When two credential transforms target the same host, the first one in config order wins.
 
-## Next
+## Related Pages
 
 - [Static Secrets](/credential-proxying/static-secrets): inject and replace patterns for API keys and tokens.
 - [OAuth2 Token Injection](/credential-proxying/oauth-token): the four OAuth2 grants, token endpoint stubbing, vendor recipes.

@@ -5,9 +5,9 @@ description: "What iron-proxy is, who it's for, and how it fits into your stack.
 
 # Overview
 
-CI jobs, AI coding agents, and sandboxed containers already have network access and real credentials. A compromised dependency, a prompt injection, or a malicious build step can exfiltrate secrets, phone home, or open a reverse shell. Today, most setups give you zero visibility into whether that's happening.
+iron-proxy is a single-binary egress firewall for untrusted workloads. It intercepts outbound traffic, checks every request against policy, and injects secrets at the network edge so the workload never sees a real credential.
 
-**iron-proxy** is the boundary that stops it. It's a single-binary egress firewall that intercepts all outbound traffic from untrusted workloads, checks every request against policy, and injects secrets at the network edge so workloads never see real credentials. Every request is logged with full detail on what was allowed, blocked, and transformed.
+CI jobs, AI coding agents, and sandboxed containers already have network access and real credentials. A compromised dependency, a prompt injection, or a malicious build step can exfiltrate secrets, phone home, or open a reverse shell. Most setups give you no visibility into whether that is happening. iron-proxy is the boundary that stops it, and every request is logged with full detail on what was allowed, blocked, and transformed.
 
 ## How It Works
 

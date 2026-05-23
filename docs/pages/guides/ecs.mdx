@@ -1,11 +1,11 @@
 ---
-title: Amazon ECS Integration
+title: "Amazon ECS Integration"
 description: "Lock down egress traffic on ECS clusters using iron-proxy as a daemon service."
 ---
 
 # Amazon ECS Integration
 
-This guide walks through running iron-proxy as a [daemon service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html#service_scheduler_daemon) on Amazon ECS. iron-proxy intercepts all outbound HTTP/HTTPS traffic from workload containers and checks it against a domain allowlist.
+Run iron-proxy as a [daemon service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html#service_scheduler_daemon) on Amazon ECS. The proxy intercepts all outbound HTTP/HTTPS traffic from workload containers and checks it against a domain allowlist.
 
 :::warning
 Fargate is not supported. Fargate doesn't allow per-container DNS overrides, which iron-proxy requires to intercept traffic. This guide requires ECS with the EC2 launch type.
@@ -439,11 +439,11 @@ See the [configuration reference](/reference/configuration#secrets) for the full
 
 ## Troubleshooting
 
-### iron-proxy container exits immediately
+### iron-proxy Container Exits Immediately
 
 Check that `AWS_REGION` is set in the container environment. Without it, the S3 config fetch fails silently.
 
-### Workloads get "connection refused"
+### Workloads Get "Connection Refused"
 
 Verify `dns.proxy_ip` in the config matches iron-proxy's actual IP on the Docker bridge:
 
@@ -452,11 +452,11 @@ sudo docker inspect $(sudo docker ps -q --filter name=iron-proxy) \
   --format '{{.NetworkSettings.Networks.bridge.IPAddress}}'
 ```
 
-### Upstream TLS errors (x509)
+### Upstream TLS Errors (x509)
 
 iron-proxy verifies upstream server certificates against its system CA bundle. If the upstream chain includes a root not in Alpine's trust store, you'll see `certificate signed by unknown authority`. Fix by adding the missing root CA to the iron-proxy image.
 
-### Port 53 conflict
+### Port 53 Conflict
 
 If `systemd-resolved` is running on the EC2 host, it binds port 53 and iron-proxy can't start. Disable it in your instance user data:
 

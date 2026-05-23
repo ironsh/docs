@@ -1,5 +1,5 @@
 ---
-title: GitHub Actions Integration
+title: "GitHub Actions Integration"
 description: "Lock down egress traffic in your CI pipelines using the iron-proxy GitHub Action."
 ---
 
@@ -150,4 +150,4 @@ All outbound HTTP/HTTPS traffic is routed through iron-proxy, which terminates T
 
 The action revokes sudo and Docker access by default. This prevents subsequent workflow steps from modifying iptables rules, DNS config, or running containers that bypass the proxy.
 
-On GitHub-hosted runners, jobs have sudo access, so a sufficiently motivated attacker who gains code execution *before* the proxy step could circumvent enforcement. For maximum security, use self-hosted runners with hypervisor-level network controls. For the vast majority of supply chain threats (compromised packages, malicious post-install scripts, rogue build plugins), this action raises the bar significantly.
+On GitHub-hosted runners, jobs have sudo access, so an attacker who gains code execution *before* the proxy step can circumvent enforcement. For stronger guarantees, use self-hosted runners with hypervisor-level network controls. Against the common supply chain threats (compromised packages, malicious post-install scripts, rogue build plugins), this action raises the bar considerably.

@@ -93,7 +93,7 @@ Choose `code` and `message` values that your agent recognizes. The defaults are 
 
 ## Tool List Filtering
 
-`tools/list` responses are filtered per-event so denied tools are removed from the agent's catalog. Filtering applies to both `application/json` responses and `text/event-stream` streamed responses. The agent only ever discovers tools that the policy allows, which keeps tool selection consistent with the enforced policy.
+`tools/list` responses are filtered per-event so denied tools never appear in the agent's catalog. Filtering applies to both `application/json` responses and `text/event-stream` streamed responses, which keeps tool selection consistent with the enforced policy.
 
 ## Audit Log
 

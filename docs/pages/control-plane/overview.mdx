@@ -102,14 +102,14 @@ The control plane is the single source of truth. Operators publish policies once
 
 **Fleet-wide audit search.** Every request across every proxy lands in one queryable store, indexed by host, workload tag, destination, decision, and the secrets that were proxied in. No per-host log shipping, no Loki cluster to operate.
 
-## Flexible Deployment
+## Deployment Options
 
-The control plane is available as a hosted cloud service and as an on-prem, self-hosted instance. Both run the same software and expose the same API, UI, and proxy protocol, so moving between them is a config change rather than a rewrite.
+The control plane is available as a hosted cloud service and as a self-hosted on-prem instance. Both run the same software and expose the same API, UI, and proxy protocol, so moving between them is a config change rather than a rewrite.
 
-**Hosted** is the fastest path to a working fleet. You enroll proxies against a tenant endpoint and get policy management, live updates, enrollment, and audit search without operating anything yourself. Best for teams that want a production-ready control plane in minutes and do not have data-residency or network-isolation requirements.
+**Hosted.** Enroll proxies against a tenant endpoint and get policy management, live updates, enrollment, and audit search without operating anything yourself. Suited to teams that want a production-ready control plane without data-residency or network-isolation requirements.
 
-**Self-hosted** runs entirely inside your own infrastructure, with source available. Policy data and audit logs stay on your network, and the deployment can be fully air-gapped. Best for regulated environments, on-prem-only networks, or any setting where a managed service is not an option.
+**Self-hosted.** Runs entirely inside your own infrastructure, with source available. Policy data and audit logs stay on your network, and the deployment can be fully air-gapped. Suited to regulated environments, on-prem-only networks, or any setting where a managed service is not an option.
 
 ## Next Steps
 
-The fastest way to see the control plane in action is a live walkthrough. [Book a demo](https://cal.com/matt-slipper-ironsh/15min) and we'll show you policy authoring, live updates, enrollment, and audit search against a real fleet.
+[Book a demo](https://cal.com/matt-slipper-ironsh/15min) for a walkthrough of policy authoring, live updates, enrollment, and audit search against a real fleet.

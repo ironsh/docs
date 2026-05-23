@@ -1,15 +1,15 @@
 ---
-title: Deployment Methods
+title: "Deployment Methods"
 description: "Compare ways to deploy iron-proxy: standalone host, network proxy, sidecar container, or embedded in a VM/sandbox."
 ---
 
 # Deployment Methods
 
-iron-proxy is a single binary that runs anywhere. How you deploy it determines the tradeoffs between circumvention resistance, operational complexity, and isolation. This guide covers four common patterns and when to use each.
+iron-proxy is a single binary, and how you place it determines the tradeoffs between circumvention resistance, operational complexity, and isolation. This page covers four common patterns and when to use each.
 
 ## Standalone Host
 
-iron-proxy runs on a dedicated machine (bare metal, EC2 instance, or VM) that sits between your workloads and the internet. Workloads on the same host or network point their DNS at the proxy, and iptables rules on the host prevent anything from bypassing it.
+The proxy runs on a dedicated machine (bare metal, EC2 instance, or VM) that sits between your workloads and the internet. Workloads on the same host or network point their DNS at the proxy, and iptables rules on the host prevent anything from bypassing it.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -33,7 +33,7 @@ This is the pattern used in the [Amazon ECS guide](/guides/ecs), where iron-prox
 
 - **Strong circumvention resistance.** Host-level iptables rules prevent workloads from reaching the internet directly. Even if a workload hardcodes an IP address or uses its own DNS resolver, the traffic is dropped.
 - **Shared across workloads.** One proxy instance covers all containers or processes on the host. Configuration and CA certificates live in one place.
-- **Simple networking.** Workloads just need their DNS pointed at the proxy. No per-container network plumbing required.
+- **Simple networking.** Workloads only need their DNS pointed at the proxy. No per-container network plumbing required.
 
 ### Cons
 
@@ -47,7 +47,7 @@ Use this when you control the host and run multiple workloads that share a netwo
 
 ## Network Proxy
 
-iron-proxy runs on a dedicated box in your network, separate from the machines running your workloads. Workload hosts use security groups, iptables, or firewall rules to ensure all outbound traffic routes through the proxy box. Nothing else is allowed to reach the internet directly.
+The proxy runs on a dedicated box in your network, separate from the machines running your workloads. Workload hosts use security groups, iptables, or firewall rules to ensure all outbound traffic routes through the proxy box. Nothing else is allowed to reach the internet directly.
 
 ```
 ┌──────────┐  ┌──────────┐
@@ -92,7 +92,7 @@ Use this when you want centralized egress control across many machines and your 
 
 ## Sidecar
 
-iron-proxy runs as a sidecar container alongside each workload container. The two containers share a network namespace (e.g., a Kubernetes pod or a Docker Compose service with `network_mode`), so the workload connects to iron-proxy on `127.0.0.1`.
+A proxy container runs alongside each workload container. The two containers share a network namespace (e.g., a Kubernetes pod or a Docker Compose service with `network_mode`), so the workload connects to iron-proxy on `127.0.0.1`.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -130,7 +130,7 @@ Use this when you cannot control the host (managed Kubernetes, Fargate-style pla
 
 ## Embedded in a VM or Sandbox
 
-iron-proxy runs inside the same VM or sandbox as your workload. The proxy binds to `127.0.0.1`, DNS is pointed at localhost, and iptables rules block all non-loopback egress from non-root processes. iron-proxy runs as root so its traffic is allowed through.
+The proxy runs inside the same VM or sandbox as your workload. It binds to `127.0.0.1`, DNS is pointed at localhost, and iptables rules block all non-loopback egress from non-root processes. iron-proxy runs as root so its traffic is allowed through.
 
 ```
 ┌──────────────────────────────────────────────┐
