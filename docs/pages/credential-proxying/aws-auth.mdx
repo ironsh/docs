@@ -1,0 +1,138 @@
+---
+title: "AWS Request Signing"
+description: "How iron-proxy re-signs AWS SigV4 requests with real credentials so workloads can talk to AWS without holding any."
+---
+
+# AWS Request Signing
+
+The `aws_auth` transform re-signs inbound AWS SigV4 requests with real credentials, so workloads can configure their AWS SDK with placeholders and point at the proxy.
+
+```yaml
+- name: aws_auth
+  config:
+    access_key_id:     {type: env, var: AWS_ACCESS_KEY_ID}
+    secret_access_key: {type: env, var: AWS_SECRET_ACCESS_KEY}
+    rules:
+      - host: "*.amazonaws.com"
+```
+
+iron-proxy reads the region and service from the inbound SigV4 credential scope and re-signs with the real credentials. One config entry covers every AWS service the client talks to. Requires MITM mode.
+
+## How It Works
+
+1. **Inbound signature parsing.** The workload's AWS SDK signs the request with placeholder credentials. iron-proxy reads the credential scope (`ACCESSKEY/DATE/REGION/SERVICE/aws4_request`) from the `Authorization` header or, for pre-signed URLs, the `X-Amz-Credential` query parameter.
+2. **Scope gating.** If `allowed_regions` or `allowed_services` is set, the inbound scope must match. Otherwise the request is rejected with HTTP 403 before any credential is resolved.
+3. **Credential resolution.** `access_key_id`, `secret_access_key`, and `session_token` each resolve through their own [secret source](/credential-proxying/static-secrets#secret-sources).
+4. **Body hashing.** iron-proxy reads the body, computes its SHA-256, and uses that as the payload hash. With `unsigned_payload: true` the proxy skips the body read and uses the literal `UNSIGNED-PAYLOAD` sentinel that S3 and Bedrock streaming accept.
+5. **Re-signing.** The proxy strips the placeholder signature headers (`Authorization`, `X-Amz-Date`, `X-Amz-Security-Token`, `X-Amz-Content-Sha256`) and re-signs the request using the AWS SDK v4 signer with the real credentials, the scope's region and service, and the current time.
+6. **Header injection.** The proxy attaches the new `Authorization`, `X-Amz-Date`, and `X-Amz-Content-Sha256` headers. If a session token is configured, it also attaches `X-Amz-Security-Token`.
+
+## Configuring The Workload
+
+The workload's AWS SDK needs three things: placeholder credentials, the correct region, and the proxy as its endpoint.
+
+```python
+import boto3
+
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name="us-east-1",
+    endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com",
+    aws_access_key_id="AKIAIOSFODNN7EXAMPLE",
+    aws_secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+)
+```
+
+The access key and secret are AWS's documented example values. They have the right shape (20-character access key starting with `AKIA`, 40-character secret) for the SDK to accept them and produce a SigV4 signature. The values themselves are meaningless: iron-proxy strips the placeholder signature and re-signs with the real credentials before the request leaves the proxy. Any syntactically valid pair works; using the AWS example values makes it obvious to the next reader that these aren't real.
+
+Route the workload's outbound traffic through iron-proxy (DNS interception, explicit proxy config, or a SOCKS tunnel). The SDK signs with the placeholder credentials; the proxy reads the region and service from that signature, re-signs with the real credentials, and forwards upstream.
+
+If the workload uses temporary credentials (assumed roles, STS), configure `session_token` as well:
+
+```yaml
+- name: aws_auth
+  config:
+    access_key_id:     {type: env, var: AWS_ACCESS_KEY_ID}
+    secret_access_key: {type: env, var: AWS_SECRET_ACCESS_KEY}
+    session_token:     {type: env, var: AWS_SESSION_TOKEN}
+    rules:
+      - host: "*.amazonaws.com"
+```
+
+## Scope Gating
+
+Without `allowed_regions` or `allowed_services`, the proxy will sign for any region and service the workload requests. That's convenient but broad. Limit the scope explicitly when you can:
+
+```yaml
+- name: aws_auth
+  config:
+    access_key_id:     {type: env, var: AWS_ACCESS_KEY_ID}
+    secret_access_key: {type: env, var: AWS_SECRET_ACCESS_KEY}
+    allowed_regions:   ["us-east-1", "eu-west-1"]
+    allowed_services:  ["bedrock", "s3", "dynamodb"]
+    rules:
+      - host: "*.amazonaws.com"
+```
+
+A request with a credential scope outside the allowed sets is rejected with HTTP 403 and `rejected: region_not_allowed` or `rejected: service_not_allowed`. The proxy never reaches the real credentials in that case.
+
+## Body Handling
+
+`aws_auth` has to know the request body to compute its SHA-256 (the payload hash AWS signs over). Two modes:
+
+- **Default.** iron-proxy reads the full body, hashes it, and replays it to the upstream. Bodies shorter than `Content-Length` are rejected with HTTP 413 (`body_truncated`). Chunked bodies are rejected with HTTP 400 (`chunked_body_not_allowed`) unless you opt in with `allow_chunked_body: true`. Raise [`proxy.max_request_body_bytes`](/reference/configuration#proxy) if your workload sends large bodies.
+- **Unsigned payload.** Set `unsigned_payload: true` to skip the body read entirely. The proxy sends the literal `UNSIGNED-PAYLOAD` sentinel as the payload hash. AWS accepts this for S3, Bedrock streaming, and other services that document support for it; check the service's signing reference before turning it on.
+
+If you use `allow_chunked_body: true`, the proxy logs a warning per signed chunked request and signs the buffered body as-is. There is no way to verify it matches what the client sent.
+
+## Configuration Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `access_key_id` | secret source | **required** | Real AWS access key ID. |
+| `secret_access_key` | secret source | **required** | Real AWS secret access key. |
+| `session_token` | secret source | | Real session token for STS or assumed-role credentials. Omit for long-lived IAM users. |
+| `allowed_regions` | string[] | any region | Allowlist of AWS regions the entry will sign for. Empty allows any. |
+| `allowed_services` | string[] | any service | Allowlist of AWS services the entry will sign for. Empty allows any. |
+| `unsigned_payload` | boolean | `false` | Sign with `UNSIGNED-PAYLOAD` instead of reading and hashing the body. |
+| `allow_chunked_body` | boolean | `false` | Sign chunked-encoding bodies without length verification. |
+| `rules` | object[] | **required** | Destinations this transform applies to. Uses the [allowlist rule format](/reference/configuration#allowlistrules). At least one rule is required. |
+
+Each credential field is a discrete [secret source](/credential-proxying/static-secrets#secret-sources). `env`, `aws_sm`, `aws_ssm`, `1password_connect`, and `1password` all work.
+
+## Failure Modes
+
+| Reason | Status | When |
+|---|---|---|
+| `missing_sigv4` | 400 | The inbound request has no SigV4 signature: no SigV4 `Authorization` header and no `X-Amz-Credential` query parameter. |
+| `region_not_allowed` | 403 | The inbound credential scope's region isn't in `allowed_regions`. |
+| `service_not_allowed` | 403 | The inbound credential scope's service isn't in `allowed_services`. |
+| `credential_unavailable` | 502 | A configured secret source returned an error when the proxy asked for its value. |
+| `body_missing` | 400 | The request declared `Content-Length > 0` but the body was empty or absent. |
+| `body_truncated` | 413 | The buffered body was shorter than `Content-Length`. Raise `proxy.max_request_body_bytes`. |
+| `chunked_body_not_allowed` | 400 | The body arrived chunked and `allow_chunked_body` is not set. |
+| `body_read_failed` | 400 | The proxy couldn't read the body off the inbound socket. |
+| `signing_failed` | 500 | The AWS SDK signer returned an error. |
+
+## Audit Log
+
+A successful signing produces these annotations on the `aws_auth` trace entry:
+
+- `injected`: the headers that were set. Always includes `header:Authorization`, `header:X-Amz-Date`, `header:X-Amz-Content-Sha256`, and `header:X-Amz-Security-Token` when a session token is configured.
+- `service`: the AWS service taken from the inbound credential scope.
+- `region`: the AWS region taken from the inbound credential scope.
+
+Rejections annotate `rejected` with one of the reasons above, plus contextual fields (`region`, `service`, `credential`, `content_length`, `buffered_length`, `error`) as appropriate.
+
+## Limitations
+
+- **MITM mode only.** `sni-only` has no method, path, or body to sign.
+- **SigV4 only.** The inbound request must already be SigV4-signed. iron-proxy validates and rewrites the signature; it doesn't sign from scratch.
+- **Re-signs at the egress boundary.** The signing time is the time iron-proxy re-signs, not the time the workload first signed. Clock skew between the proxy and AWS still matters; clock skew between the workload and the proxy doesn't.
+- **One credential set per entry.** Use multiple `aws_auth` entries with non-overlapping `rules` to map different upstream credentials to different workloads or destinations.
+
+## Related
+
+- [Static Secrets](/credential-proxying/static-secrets): inject a static API key when the upstream isn't AWS SigV4.
+- [HMAC Request Signing](/credential-proxying/hmac-sign): the generic signing transform for non-AWS schemes.
+- [Configuration reference](/reference/configuration#aws_auth): the canonical schema for the `aws_auth` transform.

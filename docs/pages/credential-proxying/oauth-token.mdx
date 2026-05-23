@@ -1,0 +1,313 @@
+---
+title: "OAuth2 Token Injection"
+description: "How iron-proxy mints OAuth2 access tokens on behalf of workloads and injects them on outbound requests."
+---
+
+# OAuth2 Token Injection
+
+The `oauth_token` transform mints short-lived OAuth2 access tokens and injects them as `Authorization: Bearer` headers on matching requests.
+
+```yaml
+- name: oauth_token
+  config:
+    tokens:
+      - grant: client_credentials
+        client_id:     {type: env, var: API_CLIENT_ID}
+        client_secret: {type: env, var: API_CLIENT_SECRET}
+        token_endpoint: "https://login.example.com/oauth2/token"
+        rules:
+          - host: "api.example.com"
+```
+
+iron-proxy holds the refresh token, client secret, or JWT signing key, performs the token exchange, and attaches the resulting bearer to outbound requests. The workload never holds a long-lived credential. Requires MITM mode.
+
+## How It Works
+
+Each entry under `tokens` declares one OAuth2 flow:
+
+1. **Credential resolution.** Each credential field (`refresh_token`, `client_id`, `private_key`, etc.) is its own [secret source](/credential-proxying/static-secrets#secret-sources). Sources can be any of the standard backends: `env`, `aws_sm`, `aws_ssm`, `1password_connect`, `1password`. Use `json_key` on any source to pull a field out of a JSON secret.
+2. **Token exchange.** iron-proxy POSTs the resolved credentials to the entry's `token_endpoint`. Caching, refresh on expiry, and single-flight deduplication go through `golang.org/x/oauth2`, the same library the official SDKs use.
+3. **Injection.** When a request matches the entry's `rules`, iron-proxy sets the configured header (default `Authorization` with prefix `Bearer `) to the cached or freshly minted bearer.
+4. **Stubbing.** iron-proxy also intercepts requests to the `token_endpoint` itself and answers them with a synthetic `iron-proxy-stub-token` response. This lets a sandboxed SDK run its normal OAuth2 handshake against the proxy without holding any real credentials. The real token is minted separately and swapped onto the upstream call.
+5. **Failure handling.** If minting fails (the credential store is down, the token endpoint rejects the request, the network breaks), iron-proxy closes the inbound request with HTTP 502 instead of forwarding it unauthenticated. The audit log carries `rejected: token_unavailable`.
+
+## Grants
+
+`oauth_token` supports four RFC 6749 / RFC 7523 grant types. The grant determines which credential fields are required. Everything else is shared.
+
+| Grant | RFC | Required credentials | Optional | Other required |
+|---|---|---|---|---|
+| `refresh_token` | RFC 6749 §6 | `refresh_token`, `client_id` | `client_secret` | |
+| `client_credentials` | RFC 6749 §4.4 | `client_id`, `client_secret` | | |
+| `password` | RFC 6749 §4.3 | `username`, `password`, `client_id` | `client_secret` | |
+| `jwt_bearer` | RFC 7523 | `issuer`, `subject`, `private_key` | `private_key_id` | `audience` |
+
+### `refresh_token`
+
+The proxy holds a long-lived refresh token and trades it for a short-lived access token on each call or on expiry.
+
+```yaml
+- grant: refresh_token
+  refresh_token:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "refresh_token"
+  client_id:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "client_id"
+  client_secret:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "client_secret"
+  token_endpoint: "https://oauth2.googleapis.com/token"
+  scopes:
+    - "https://www.googleapis.com/auth/gmail.readonly"
+  rules:
+    - host: "gmail.googleapis.com"
+```
+
+Omit `client_secret` for public PKCE clients. `json_key` pulls each field out of one JSON secret in Secrets Manager.
+
+### `client_credentials`
+
+Machine-to-machine flow. Use it when the API issues a client ID and secret for service auth and the workload doesn't have a user identity of its own.
+
+```yaml
+- grant: client_credentials
+  client_id:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123:secret:oauth"
+    json_key: "client_id"
+  client_secret:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123:secret:oauth"
+    json_key: "client_secret"
+  token_endpoint: "https://login.example.com/oauth2/token"
+  rules:
+    - host: "api.example.com"
+```
+
+`json_key` keeps both fields in one Secrets Manager entry.
+
+### `password`
+
+The resource-owner password grant. Used by vendors that issue a username and password for a service account (not for a real human) and trade them for bearers.
+
+```yaml
+- grant: password
+  username:      {type: env, var: API_USERNAME}
+  password:      {type: env, var: API_PASSWORD}
+  client_id:     {type: env, var: API_CLIENT_ID}
+  client_secret: {type: env, var: API_CLIENT_SECRET}
+  token_endpoint: "https://api.example.com/token"
+  rules:
+    - host: "api.example.com"
+```
+
+### `jwt_bearer`
+
+RFC 7523. The proxy signs a JWT with an RSA private key, posts it as an assertion, and receives a bearer in exchange. This is the right grant for DocuSign, Salesforce, Box, Zoom Server-to-Server, Adobe Sign, and most other vendors that authenticate machine clients with a signed assertion.
+
+```yaml
+- grant: jwt_bearer
+  issuer:  {type: env, var: DOCUSIGN_INTEGRATION_KEY}
+  subject: {type: env, var: DOCUSIGN_USER_GUID}
+  private_key:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:docusign-private-key"
+  private_key_id: {type: env, var: DOCUSIGN_KEY_ID}
+  audience: "account.docusign.com"
+  token_endpoint: "https://account.docusign.com/oauth/token"
+  scopes: ["signature", "impersonation"]
+  rules:
+    - host: "*.docusign.net"
+```
+
+`private_key` must resolve to a PEM-encoded RSA private key. `private_key_id`, when set, is emitted as the JWT `kid` header. `audience` is the JWT `aud` claim and is required for this grant.
+
+For Google service-account JWT-bearer auth, use the [`gcp_auth`](/credential-proxying/gcp-auth) transform instead. It wraps the same RFC 7523 flow around Google's keyfile format and also stubs the GCE/GKE metadata server.
+
+## Token Endpoint Stubbing
+
+iron-proxy intercepts requests to the configured `token_endpoint` and answers them with a synthetic response:
+
+```json
+{"access_token":"iron-proxy-stub-token","expires_in":3600,"token_type":"Bearer"}
+```
+
+The stub token is meaningless. When the client uses it on a subsequent API call (`Authorization: Bearer iron-proxy-stub-token`), iron-proxy matches the request against the entry's `rules` and swaps the stub for the real bearer.
+
+This lets sandboxed SDKs run their normal OAuth2 dance without any real credentials. The workload only needs a plausible-looking placeholder. The real values stay on the proxy.
+
+## Token Endpoint Headers
+
+Some vendors want an API key on the token endpoint itself, alongside the standard form-body client auth. Use `token_endpoint_headers` to add headers to the token POST.
+
+```yaml
+- grant: password
+  username:      {type: env, var: API_USERNAME}
+  password:      {type: env, var: API_PASSWORD}
+  client_id:     {type: env, var: API_CLIENT_ID}
+  token_endpoint: "https://api.example.com/token"
+  token_endpoint_headers:
+    x-api-key: {type: env, var: API_KEY}
+  rules:
+    - host: "api.example.com"
+```
+
+Each value is its own secret source. Header casing is preserved on the wire (HTTP/1.x only).
+
+## Vendor Recipes
+
+The grant, audience, and token endpoint are the only per-vendor differences. Credential field shapes are identical across vendors using the same grant.
+
+### DocuSign
+
+```yaml
+- grant: jwt_bearer
+  issuer:  {type: env, var: DOCUSIGN_INTEGRATION_KEY}
+  subject: {type: env, var: DOCUSIGN_USER_GUID}
+  private_key:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:docusign-private-key"
+  audience: "account.docusign.com"          # account-d.docusign.com for the dev sandbox
+  token_endpoint: "https://account.docusign.com/oauth/token"
+  scopes: ["signature", "impersonation"]
+  rules:
+    - host: "*.docusign.net"
+```
+
+### Salesforce
+
+```yaml
+- grant: jwt_bearer
+  issuer:  {type: env, var: SALESFORCE_CONSUMER_KEY}
+  subject: {type: env, var: SALESFORCE_USERNAME}
+  private_key:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:salesforce-private-key"
+  audience: "https://login.salesforce.com"
+  token_endpoint: "https://login.salesforce.com/services/oauth2/token"
+  rules:
+    - host: "*.my.salesforce.com"
+    - host: "*.salesforce.com"
+```
+
+### Box
+
+```yaml
+- grant: jwt_bearer
+  issuer:  {type: env, var: BOX_CLIENT_ID}
+  subject: {type: env, var: BOX_ENTERPRISE_ID}
+  private_key:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:box-private-key"
+  audience: "https://api.box.com/oauth2/token"
+  token_endpoint: "https://api.box.com/oauth2/token"
+  rules:
+    - host: "api.box.com"
+    - host: "upload.box.com"
+```
+
+### Zoom Server-to-Server
+
+```yaml
+- grant: jwt_bearer
+  issuer:  {type: env, var: ZOOM_ACCOUNT_ID}
+  subject: {type: env, var: ZOOM_CLIENT_ID}
+  private_key:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:zoom-private-key"
+  audience: "zoom.us"
+  token_endpoint: "https://zoom.us/oauth/token"
+  rules:
+    - host: "api.zoom.us"
+```
+
+### Gmail (User OAuth)
+
+A long-lived Google refresh token issued through the user OAuth consent flow, traded on each call.
+
+```yaml
+- grant: refresh_token
+  refresh_token:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "refresh_token"
+  client_id:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "client_id"
+  client_secret:
+    type: aws_sm
+    secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gsuite-oauth"
+    json_key: "client_secret"
+  token_endpoint: "https://oauth2.googleapis.com/token"
+  scopes:
+    - "https://www.googleapis.com/auth/gmail.readonly"
+  rules:
+    - host: "gmail.googleapis.com"
+```
+
+### AlphaSense
+
+AlphaSense uses a password grant for the bearer plus a static API key and client ID on every GraphQL call. `oauth_token` mints the bearer; a sibling `secrets` transform injects the two static headers.
+
+```yaml
+- name: oauth_token
+  config:
+    tokens:
+      - grant: password
+        username:      {type: env, var: ALPHASENSE_USERNAME}
+        password:      {type: env, var: ALPHASENSE_PASSWORD}
+        client_id:     {type: env, var: ALPHASENSE_CLIENT_ID}
+        client_secret: {type: env, var: ALPHASENSE_CLIENT_SECRET}
+        token_endpoint: "https://api.alpha-sense.com/token"
+        token_endpoint_headers:
+          x-api-key: {type: env, var: ALPHASENSE_API_KEY}
+        rules:
+          - host: "api.alpha-sense.com"
+            paths: ["/gql", "/gql/*"]
+
+- name: secrets
+  config:
+    secrets:
+      - source: {type: env, var: ALPHASENSE_API_KEY}
+        inject: {header: "x-api-key"}
+        rules:
+          - host: "api.alpha-sense.com"
+            paths: ["/gql", "/gql/*"]
+      - source: {type: env, var: ALPHASENSE_CLIENT_ID}
+        inject: {header: "clientId"}
+        rules:
+          - host: "api.alpha-sense.com"
+            paths: ["/gql", "/gql/*"]
+```
+
+## Credential Rotation
+
+When a secret source has a non-zero `ttl`, iron-proxy re-reads the credential on that interval and rebuilds the underlying token source whenever the value changes. A credential rotated in the backend store gets picked up on the next refresh without a restart. iron-proxy doesn't retain the plaintext credential between mints.
+
+## Audit Log
+
+A successful injection produces these annotations on the `oauth_token` trace entry:
+
+- `grant`: the grant type (`refresh_token`, `client_credentials`, `password`, `jwt_bearer`).
+- `injected`: the headers that were set, e.g. `["header:Authorization"]`.
+
+A stubbed token endpoint request is annotated `stubbed: oauth2_token_endpoint` and rendered as the `stub` action.
+
+A mint failure annotates `grant`, `error`, and `rejected: token_unavailable`, and the request is rejected with HTTP 502.
+
+## Limitations
+
+- **MITM mode only.** `sni-only` can't rewrite headers.
+- **First match wins.** When two `tokens` entries match the same request, the first in config order is used. Order entries from most specific to least specific.
+- **One header per entry.** An entry injects exactly one header. If the vendor also requires a static header (an API key, a client ID), inject it with a separate [`secrets`](/credential-proxying/static-secrets) entry. See the AlphaSense recipe above.
+
+## Related
+
+- [GCP Service Accounts](/credential-proxying/gcp-auth): the same JWT-bearer flow wrapped around Google's keyfile format, with metadata-server stubbing.
+- [Static Secrets](/credential-proxying/static-secrets): inject the static headers some vendors require alongside an OAuth2 bearer.
+- [Configuration reference](/reference/configuration#oauth_token): the canonical schema for the `oauth_token` transform.

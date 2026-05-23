@@ -1,0 +1,163 @@
+---
+title: "GCP Service Accounts"
+description: "How iron-proxy mints Google service-account access tokens on behalf of workloads and injects them on outbound requests."
+---
+
+# GCP Service Accounts
+
+The `gcp_auth` transform mints Google Cloud access tokens from a service-account keyfile and injects them as `Authorization: Bearer` headers on matching requests.
+
+```yaml
+- name: gcp_auth
+  config:
+    keyfile:
+      type: aws_sm
+      secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gcp-sa-key"
+    scopes:
+      - "https://www.googleapis.com/auth/cloud-platform"
+    rules:
+      - host: "*.googleapis.com"
+```
+
+iron-proxy holds the keyfile, signs the JWT assertion, exchanges it at Google's token endpoint, and attaches the bearer to outbound calls. The workload never sees the keyfile. Requires MITM mode.
+
+Under the hood, `gcp_auth` is an RFC 7523 JWT-bearer flow with Google's keyfile format and metadata-server stubbing. For non-Google JWT-bearer flows (DocuSign, Salesforce, Box, Zoom Server-to-Server), use [`oauth_token` with `grant: jwt_bearer`](/credential-proxying/oauth-token#jwt_bearer) instead.
+
+## How It Works
+
+1. **Keyfile resolution.** The service-account JSON loads either from disk (`keyfile_path`) or from any [secret source](/credential-proxying/overview#secret-sources) (`keyfile`). Set exactly one.
+2. **Token minting.** iron-proxy signs a JWT with the service account's RSA private key, posts it to Google's OAuth2 token endpoint as a `urn:ietf:params:oauth:grant-type:jwt-bearer` assertion, and receives a short-lived access token in exchange. Minting goes through `golang.org/x/oauth2/google`, the same code path the official Google Cloud SDKs use.
+3. **Caching and refresh.** Tokens are cached in memory until they near expiry, then refreshed in the background. Single-flight deduplication ensures concurrent requests share one mint.
+4. **Header injection.** When a request matches the entry's `rules`, iron-proxy sets `Authorization` to the cached or freshly minted bearer.
+5. **Endpoint stubbing.** iron-proxy intercepts two kinds of token requests and answers them with a synthetic `iron-proxy-stub-token` response: requests to Google's OAuth2 token endpoint (`oauth2.googleapis.com/token`) and requests to the GCE/GKE metadata server's service-account token paths (`metadata.google.internal` and `169.254.169.254` under `/computeMetadata/v1/instance/service-accounts/*/token`). This lets Google Cloud SDKs run their normal Application Default Credentials dance without a real keyfile and without actually being on GCP. iron-proxy mints the real token separately and swaps it onto the upstream API call.
+6. **Failure handling.** On any error during keyfile load, JWT signing, or token exchange, the request is rejected with HTTP 403 and the audit log carries `rejected: token_unavailable`.
+
+## Scopes
+
+OAuth2 scopes are baked into the minted token and must be declared up front. List every scope the workload's calls will need:
+
+```yaml
+scopes:
+  - "https://www.googleapis.com/auth/cloud-platform"
+  - "https://www.googleapis.com/auth/bigquery.readonly"
+```
+
+`cloud-platform` is the broadest scope and covers most GCP APIs. Narrower scopes (`bigquery.readonly`, `devstorage.read_only`, and so on) limit what a captured token could do.
+
+One `gcp_auth` transform can serve multiple GCP APIs. Widen its `scopes` and `rules` to cover them. Use a second entry only when you want different service accounts or different scope sets for different hosts.
+
+## Domain-Wide Delegation
+
+Set `subject` to impersonate a Google Workspace user. The minted token then acts as that user rather than as the service account. This is required for service-account access to user data in Gmail, Drive, Calendar, and the Admin SDK.
+
+```yaml
+- name: gcp_auth
+  config:
+    keyfile:
+      type: aws_sm
+      secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gcp-sa-key"
+    subject: "automation@example.com"
+    scopes:
+      - "https://www.googleapis.com/auth/admin.directory.user.readonly"
+    rules:
+      - host: "admin.googleapis.com"
+```
+
+The service account must be authorized in the Workspace Admin Console for the scopes it impersonates, and `subject` must be the email of a real Workspace user. Without delegation set up on the Google side, the token mint succeeds but every API call returns 403.
+
+## Examples
+
+### Keyfile From Disk
+
+The simplest setup. Mount the service-account JSON file into the proxy container.
+
+```yaml
+- name: gcp_auth
+  config:
+    keyfile_path: "/etc/iron-proxy/gcp-sa.json"
+    scopes:
+      - "https://www.googleapis.com/auth/cloud-platform"
+    rules:
+      - host: "*.googleapis.com"
+```
+
+### Keyfile From AWS Secrets Manager
+
+Recommended for production. Keeps the keyfile out of disk images and CI logs.
+
+```yaml
+- name: gcp_auth
+  config:
+    keyfile:
+      type: aws_sm
+      secret_id: "arn:aws:secretsmanager:us-east-1:123456789:secret:gcp-sa-key"
+      region: "us-east-1"
+      ttl: 1h
+    scopes:
+      - "https://www.googleapis.com/auth/cloud-platform"
+    rules:
+      - host: "*.googleapis.com"
+```
+
+The `ttl` lets you rotate the keyfile in AWS without restarting the proxy. The same pattern works with `aws_ssm`, `1password_connect`, or any other [secret source](/credential-proxying/static-secrets#secret-sources). The keyfile JSON only has to land somewhere the proxy can read.
+
+### Multiple Service Accounts
+
+One iron-proxy can serve several GCP service accounts. Add multiple `gcp_auth` entries with non-overlapping `rules`:
+
+```yaml
+transforms:
+  - name: gcp_auth
+    config:
+      keyfile: {type: env, var: GCP_SA_BIGQUERY_JSON}
+      scopes: ["https://www.googleapis.com/auth/bigquery"]
+      rules:
+        - host: "bigquery.googleapis.com"
+
+  - name: gcp_auth
+    config:
+      keyfile: {type: env, var: GCP_SA_STORAGE_JSON}
+      scopes: ["https://www.googleapis.com/auth/devstorage.read_only"]
+      rules:
+        - host: "storage.googleapis.com"
+```
+
+The first entry with matching rules wins, so order entries from most specific to least specific.
+
+## Metadata Server Stubbing
+
+Google Cloud SDKs running outside GCP often probe the metadata server (`169.254.169.254` or `metadata.google.internal`) to discover that they're on a GCE or GKE instance and fetch credentials from it. iron-proxy intercepts the service-account token endpoints on the metadata server and returns the stub token described above. SDKs that use Application Default Credentials work transparently:
+
+```python
+# Inside the workload. No GCP credentials configured locally.
+from google.cloud import bigquery
+client = bigquery.Client()
+# Library probes the metadata server, gets the stub token, makes a BigQuery call
+# with Authorization: Bearer iron-proxy-stub-token. iron-proxy swaps the stub
+# for a real token before the request leaves the proxy.
+```
+
+This is the same stubbing pattern `oauth_token` uses for arbitrary OAuth2 token endpoints, specialized for Google's metadata service. Stubbing runs before rule evaluation, so SDKs can complete credential discovery even when your `rules` only target the API hosts.
+
+## Audit Log
+
+A successful injection produces these annotations on the `gcp_auth` trace entry:
+
+- `service_account`: the `client_email` from the keyfile.
+- `injected`: `["header:Authorization"]`.
+
+A stubbed metadata or token endpoint request is annotated `stubbed: oauth2_token_endpoint` and rendered as the `stub` action.
+
+A mint failure annotates `error` and `rejected: token_unavailable`, and the request is rejected with HTTP 403.
+
+## Limitations
+
+- **Service-account keyfiles only.** `gcp_auth` uses `JWTConfigFromJSON`, which only accepts service-account JSON. Workload identity federation and `external_account` credential configurations aren't supported.
+- **MITM mode only.** `sni-only` can't rewrite headers.
+- **One service account per entry.** Use multiple `gcp_auth` entries with non-overlapping `rules` to serve more than one.
+
+## Related
+
+- [OAuth2 Token Injection](/credential-proxying/oauth-token): the same JWT-bearer machinery for non-Google vendors (DocuSign, Salesforce, Box, Zoom).
+- [Static Secrets](/credential-proxying/static-secrets): supply the keyfile from AWS Secrets Manager, 1Password Connect, or any other backend.
+- [Configuration reference](/reference/configuration#gcp_auth): the canonical schema for the `gcp_auth` transform.
