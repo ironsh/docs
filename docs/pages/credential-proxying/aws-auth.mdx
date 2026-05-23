@@ -22,10 +22,10 @@ iron-proxy reads the region and service from the inbound SigV4 credential scope 
 
 1. **Inbound signature parsing.** The workload's AWS SDK signs the request with placeholder credentials. iron-proxy reads the credential scope (`ACCESSKEY/DATE/REGION/SERVICE/aws4_request`) from the `Authorization` header or, for pre-signed URLs, the `X-Amz-Credential` query parameter.
 2. **Scope gating.** If `allowed_regions` or `allowed_services` is set, the inbound scope must match. Otherwise the request is rejected with HTTP 403 before any credential is resolved.
-3. **Credential resolution.** `access_key_id`, `secret_access_key`, and `session_token` each resolve through their own [secret source](/credential-proxying/static-secrets#secret-sources).
+3. **Credential resolution.** `access_key_id` and `secret_access_key` each resolve through their own [secret source](/credential-proxying/static-secrets#secret-sources).
 4. **Body hashing.** iron-proxy reads the body, computes its SHA-256, and uses that as the payload hash. With `unsigned_payload: true` the proxy skips the body read and uses the literal `UNSIGNED-PAYLOAD` sentinel that S3 and Bedrock streaming accept.
 5. **Re-signing.** The proxy strips the placeholder signature headers (`Authorization`, `X-Amz-Date`, `X-Amz-Security-Token`, `X-Amz-Content-Sha256`) and re-signs the request using the AWS SDK v4 signer with the real credentials, the scope's region and service, and the current time.
-6. **Header injection.** The proxy attaches the new `Authorization`, `X-Amz-Date`, and `X-Amz-Content-Sha256` headers. If a session token is configured, it also attaches `X-Amz-Security-Token`.
+6. **Header injection.** The proxy attaches the new `Authorization`, `X-Amz-Date`, and `X-Amz-Content-Sha256` headers.
 
 ## Configuring The Workload
 
@@ -46,18 +46,6 @@ bedrock = boto3.client(
 The access key and secret are AWS's documented example values. They have the right shape (20-character access key starting with `AKIA`, 40-character secret) for the SDK to accept them and produce a SigV4 signature. The values themselves are meaningless: iron-proxy strips the placeholder signature and re-signs with the real credentials before the request leaves the proxy. Any syntactically valid pair works; using the AWS example values makes it obvious to the next reader that these aren't real.
 
 Route the workload's outbound traffic through iron-proxy (DNS interception, explicit proxy config, or a SOCKS tunnel). The SDK signs with the placeholder credentials; the proxy reads the region and service from that signature, re-signs with the real credentials, and forwards upstream.
-
-If the workload uses temporary credentials (assumed roles, STS), configure `session_token` as well:
-
-```yaml
-- name: aws_auth
-  config:
-    access_key_id:     {type: env, var: AWS_ACCESS_KEY_ID}
-    secret_access_key: {type: env, var: AWS_SECRET_ACCESS_KEY}
-    session_token:     {type: env, var: AWS_SESSION_TOKEN}
-    rules:
-      - host: "*.amazonaws.com"
-```
 
 ## Scope Gating
 
@@ -91,7 +79,6 @@ If you use `allow_chunked_body: true`, the proxy logs a warning per signed chunk
 |---|---|---|---|
 | `access_key_id` | secret source | **required** | Real AWS access key ID. |
 | `secret_access_key` | secret source | **required** | Real AWS secret access key. |
-| `session_token` | secret source | | Real session token for STS or assumed-role credentials. Omit for long-lived IAM users. |
 | `allowed_regions` | string[] | any region | Allowlist of AWS regions the entry will sign for. Empty allows any. |
 | `allowed_services` | string[] | any service | Allowlist of AWS services the entry will sign for. Empty allows any. |
 | `unsigned_payload` | boolean | `false` | Sign with `UNSIGNED-PAYLOAD` instead of reading and hashing the body. |
@@ -118,7 +105,7 @@ Each credential field is a discrete [secret source](/credential-proxying/static-
 
 A successful signing produces these annotations on the `aws_auth` trace entry:
 
-- `injected`: the headers that were set. Always includes `header:Authorization`, `header:X-Amz-Date`, `header:X-Amz-Content-Sha256`, and `header:X-Amz-Security-Token` when a session token is configured.
+- `injected`: the headers that were set. Always includes `header:Authorization`, `header:X-Amz-Date`, and `header:X-Amz-Content-Sha256`.
 - `service`: the AWS service taken from the inbound credential scope.
 - `region`: the AWS region taken from the inbound credential scope.
 
