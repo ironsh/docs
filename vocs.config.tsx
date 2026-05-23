@@ -99,23 +99,15 @@ export default defineConfig({
     { text: "Quickstart", link: "/quickstart" },
     { text: "Getting Help", link: "/help" },
     {
-      text: "Control Plane",
+      text: "Credential Proxying",
       collapsed: false,
       items: [
-        { text: "Overview", link: "/control-plane/overview" },
-        { text: "Enrollment", link: "/control-plane/enrollment" },
-        { text: "Policies", link: "/control-plane/policies" },
-        { text: "Self-Hosted", link: "/control-plane/self-hosted" },
-        {
-          text: "API Reference",
-          collapsed: true,
-          items: [
-            { text: "Overview", link: "/control-plane/api/overview" },
-            { text: "Network Policies", link: "/control-plane/api/network-policies" },
-            { text: "Secret Policies", link: "/control-plane/api/secret-policies" },
-            { text: "MCP Policies", link: "/control-plane/api/mcp-policies" },
-          ],
-        },
+        { text: "Overview", link: "/credential-proxying/overview" },
+        { text: "Static Secrets", link: "/credential-proxying/static-secrets" },
+        { text: "OAuth2 Token Injection", link: "/credential-proxying/oauth-token" },
+        { text: "HMAC Request Signing", link: "/credential-proxying/hmac-sign" },
+        { text: "AWS Request Signing", link: "/credential-proxying/aws-auth" },
+        { text: "GCP Service Accounts", link: "/credential-proxying/gcp-auth" },
       ],
     },
     {
@@ -133,15 +125,23 @@ export default defineConfig({
       ],
     },
     {
-      text: "Credential Proxying",
+      text: "Control Plane",
       collapsed: false,
       items: [
-        { text: "Overview", link: "/credential-proxying/overview" },
-        { text: "Static Secrets", link: "/credential-proxying/static-secrets" },
-        { text: "OAuth2 Token Injection", link: "/credential-proxying/oauth-token" },
-        { text: "HMAC Request Signing", link: "/credential-proxying/hmac-sign" },
-        { text: "AWS Request Signing", link: "/credential-proxying/aws-auth" },
-        { text: "GCP Service Accounts", link: "/credential-proxying/gcp-auth" },
+        { text: "Overview", link: "/control-plane/overview" },
+        { text: "Enrollment", link: "/control-plane/enrollment" },
+        { text: "Policies", link: "/control-plane/policies" },
+        { text: "Self-Hosted", link: "/control-plane/self-hosted" },
+        {
+          text: "API Reference",
+          collapsed: true,
+          items: [
+            { text: "Overview", link: "/control-plane/api/overview" },
+            { text: "Network Policies", link: "/control-plane/api/network-policies" },
+            { text: "Secret Policies", link: "/control-plane/api/secret-policies" },
+            { text: "MCP Policies", link: "/control-plane/api/mcp-policies" },
+          ],
+        },
       ],
     },
     {
