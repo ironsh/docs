@@ -46,6 +46,10 @@ Each entry under `tokens` declares one OAuth2 flow:
 
 The proxy holds a long-lived refresh token and trades it for a short-lived access token on each call or on expiry.
 
+:::warning
+iron-proxy never writes rotated refresh tokens back to the secret store. With providers that rotate (Google, Okta, Auth0), run a single instance per refresh token. See [Refresh token rotation](#refresh-token-rotation) below.
+:::
+
 ```yaml
 - grant: refresh_token
   refresh_token:
@@ -68,6 +72,17 @@ The proxy holds a long-lived refresh token and trades it for a short-lived acces
 ```
 
 Omit `client_secret` for public PKCE clients. `json_key` pulls each field out of one JSON secret in Secrets Manager.
+
+#### Refresh Token Rotation
+
+Some providers issue a new refresh token on every exchange and invalidate the old one. Google with rotation enabled, Auth0, and Okta with one-time-use refresh tokens all behave this way. iron-proxy keeps the rotated token in memory for the lifetime of the process and does not write it back to the secret source.
+
+In practice, the flow works until the secret source is re-read with the original token. The next exchange after that fails with `invalid_grant`, which iron-proxy classifies as unrecoverable, and a human has to seed a fresh refresh token in the secret store.
+
+Two implications:
+
+- Run a single iron-proxy instance per refresh token. A second instance reading the same secret holds the original value and will fail on its next exchange. For high availability, prefer `client_credentials` or `jwt_bearer`, which carry no per-call rotation state.
+- Avoid short `ttl` values on the refresh-token secret source. A re-read overwrites the in-memory rotated token with the stale store value.
 
 ### `client_credentials`
 
