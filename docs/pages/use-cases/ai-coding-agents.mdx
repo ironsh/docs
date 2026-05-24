@@ -1,0 +1,60 @@
+---
+title: "AI Coding Agents"
+description: "Allowlist the model APIs and source hosts an agent needs, hold provider keys at the boundary, log blocked calls alongside the allowed ones."
+---
+
+# AI Coding Agents
+
+An iron-proxy in front of an AI coding agent allowlists the model APIs and source hosts the agent needs, holds the model provider keys, and logs every request including the blocked ones.
+
+## A Starting Config
+
+A minimal setup that lets the agent talk to model APIs and read public source, with credentials held at the boundary.
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "api.anthropic.com"
+        - "api.openai.com"
+        - "registry.npmjs.org"
+        - "api.github.com"
+        - "raw.githubusercontent.com"
+
+  - name: secrets
+    config:
+      secrets:
+        - source: { type: env, var: ANTHROPIC_API_KEY }
+          replace:
+            proxy_value: "proxy-anthropic-key"
+            match_headers: ["x-api-key", "Authorization"]
+          rules:
+            - host: "api.anthropic.com"
+
+        - source: { type: env, var: OPENAI_API_KEY }
+          replace:
+            proxy_value: "proxy-openai-key"
+            match_headers: ["Authorization"]
+          rules:
+            - host: "api.openai.com"
+```
+
+The agent's environment holds `proxy-anthropic-key` and `proxy-openai-key`. The real keys never leave the proxy process.
+
+## Add MCP Interception
+
+If the agent uses MCP servers, [MCP Interception](/policies/mcp-interception) gives you per-tool allowlists: deny `shell.exec` to one server, allow read-only filesystem tools on another, log every tool call with its arguments.
+
+## Deploy It
+
+- [Kubernetes](/deploy/kubernetes): sidecar in the agent's pod.
+- [Daytona](/deploy/daytona): pre-baked into a Daytona workspace image.
+- [Bare metal](/deploy/bare-metal): systemd unit alongside a long-running agent process.
+- [Freestyle](/deploy/freestyle): bootstrap during sandbox setup.
+
+## Related
+
+- [LLM Judge](/policies/llm-judge): semantic policy on top of the network allowlist.
+- [Audit log export](/guides/otel-export): pipe every agent request to your observability stack.
+- [Quickstart](/quickstart): see the allow, block, and secret-swap loop end-to-end.

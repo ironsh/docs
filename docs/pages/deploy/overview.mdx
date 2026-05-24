@@ -27,7 +27,7 @@ The proxy runs on a dedicated machine (bare metal, EC2 instance, or VM) that sit
 └──────────────────────────────────────────────────────────┘
 ```
 
-This is the pattern used in the [Amazon ECS guide](/guides/ecs), where iron-proxy runs as a daemon service on each EC2 instance and workload containers share the host's Docker bridge network.
+This is the pattern used in the [Amazon ECS guide](/deploy/ecs), where iron-proxy runs as a daemon service on each EC2 instance and workload containers share the host's Docker bridge network.
 
 ### Pros
 
@@ -151,7 +151,7 @@ The proxy runs inside the same VM or sandbox as your workload. It binds to `127.
 └──────────────────────────────────────────────┘
 ```
 
-This is the pattern used in the [bare metal guide](/guides/bare-metal), the [Daytona guide](/guides/daytona), the [Freestyle guide](/guides/freestyle), and the [GitHub Actions guide](/guides/github-actions).
+This is the pattern used in the [bare metal guide](/deploy/bare-metal), the [Daytona guide](/deploy/daytona), the [Freestyle guide](/deploy/freestyle), and the [GitHub Actions guide](/deploy/github-actions).
 
 ### Pros
 

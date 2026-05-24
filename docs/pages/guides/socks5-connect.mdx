@@ -1,9 +1,9 @@
 ---
-title: "SOCKS5 and CONNECT Tunnels"
+title: "Tunneling with SOCKS5 and CONNECT"
 description: "Route traffic through iron-proxy using SOCKS5 or HTTP CONNECT instead of DNS interception."
 ---
 
-# SOCKS5 and CONNECT Tunnels
+# Tunneling with SOCKS5 and CONNECT
 
 iron-proxy can accept traffic via SOCKS5 and HTTP CONNECT tunnel requests in addition to its standard DNS-based interception. This is useful when you cannot control DNS resolution but can configure a proxy address: for example, applications that support `HTTPS_PROXY`/`ALL_PROXY` environment variables, or tools with built-in SOCKS5 support.
 
@@ -82,4 +82,4 @@ You can run both at the same time. DNS interception and the tunnel listener are 
 
 ## CA Certificates
 
-The tunnel listener MITM's TLS connections using the same CA as the standard HTTPS listener. Workloads connecting through the tunnel still need to trust iron-proxy's CA certificate. See [CA Certificates](/reference/ca-certificates) for setup instructions.
+The tunnel listener MITM's TLS connections using the same CA as the standard HTTPS listener. Workloads connecting through the tunnel still need to trust iron-proxy's CA certificate. See [Managing CA Certificates](/guides/ca-certificates) for setup instructions.

@@ -714,7 +714,7 @@ Delegates request and response processing to an external gRPC server implementin
 
 ### `judge`
 
-Calls a large language model to produce an allow or deny decision for outbound requests that match the instance's rules. Each `judge` entry is an independent instance with its own natural-language policy, LLM backend, semaphore, and circuit breaker. See the [LLM Judge reference](/reference/llm-judge) for a full overview, including writing policies, pipeline ordering, and envelope limits.
+Calls a large language model to produce an allow or deny decision for outbound requests that match the instance's rules. Each `judge` entry is an independent instance with its own natural-language policy, LLM backend, semaphore, and circuit breaker. See the [LLM Judge reference](/policies/llm-judge) for a full overview, including writing policies, pipeline ordering, and envelope limits.
 
 The judge can only reject. It never approves a request that the static allowlist would have denied.
 
@@ -807,7 +807,7 @@ provider:
       management, billing, or any repository the agent is not reviewing.
 ```
 
-Place the `judge` transform before the `secrets` transform so the LLM provider sees proxy tokens rather than real credentials. See [pipeline ordering](/reference/llm-judge#pipeline-ordering) for details.
+Place the `judge` transform before the `secrets` transform so the LLM provider sees proxy tokens rather than real credentials. See [pipeline ordering](/policies/llm-judge#pipeline-ordering) for details.
 
 ### `header_allowlist`
 
@@ -837,7 +837,7 @@ Place this transform after any transforms that inject headers (such as `secrets`
 
 Top-level block that enforces a default-deny tool allowlist on Streamable HTTP MCP servers. The interceptor runs after the transform pipeline, so `allowlist` still gates which hosts can be reached and `secrets` has already swapped proxy tokens before the interceptor evaluates the body.
 
-See the [MCP Interception reference](/reference/mcp-interception) for a full overview, including matchers, audit log behavior, and current limitations.
+See the [MCP Interception reference](/policies/mcp-interception) for a full overview, including matchers, audit log behavior, and current limitations.
 
 | Field | Type | Default | Description |
 |---|---|---|---|

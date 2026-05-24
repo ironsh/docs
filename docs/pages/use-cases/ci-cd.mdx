@@ -1,0 +1,57 @@
+---
+title: "CI/CD Egress Control"
+description: "Allowlist the registries and APIs a build needs, hold the registry tokens, log every request the runner makes."
+---
+
+# CI/CD Egress Control
+
+An iron-proxy in front of a CI runner allowlists the registries and APIs the build needs, holds the registry tokens and credentials the build uses, and logs every request with method, host, path, status, and the policy that decided.
+
+## A Starting Config
+
+Size the allowlist to the dependencies the build actually pulls. Add credential injection for the registries and APIs the build calls.
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "registry.npmjs.org"
+        - "*.pypi.org"
+        - "proxy.golang.org"
+        - "api.github.com"
+        - "ghcr.io"
+
+  - name: secrets
+    config:
+      secrets:
+        - source: { type: env, var: NPM_TOKEN }
+          replace:
+            proxy_value: "proxy-npm-token"
+            match_headers: ["Authorization", "//npm-auth-token"]
+          rules:
+            - host: "registry.npmjs.org"
+
+        - source: { type: env, var: GITHUB_TOKEN }
+          replace:
+            proxy_value: "proxy-gh-token"
+            match_headers: ["Authorization"]
+          rules:
+            - host: "api.github.com"
+            - host: "ghcr.io"
+```
+
+The build references `proxy-npm-token` and `proxy-gh-token` as if they were the real tokens.
+
+## Pick Your Runner
+
+- [GitHub Actions](/deploy/github-actions): single-step install with the `ironsh/iron-proxy-action` action. Includes the per-job summary table.
+- [Kubernetes](/deploy/kubernetes): sidecar pattern for runner pods (Argo, Tekton, GitLab Runner on K8s, Jenkins agents).
+- [Amazon ECS](/deploy/ecs): sidecar container in the same task definition as the runner.
+- [Bare metal](/deploy/bare-metal): systemd unit on self-hosted runners.
+
+## Related
+
+- [Quickstart](/quickstart): local Docker Compose demo of allow, block, and secret-swap.
+- [Static Secrets](/credential-proxying/static-secrets): full reference for the `secrets` transform.
+- [LLM Judge](/policies/llm-judge): add semantic filtering on top of the allowlist for AI-driven builds.

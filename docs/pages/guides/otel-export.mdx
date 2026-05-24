@@ -1,9 +1,9 @@
 ---
-title: "Exporting Logs to OpenTelemetry"
+title: "Configuring OTEL Export"
 description: "Ship iron-proxy audit logs to any OTLP-compatible backend like Axiom, ClickHouse, or Logfire."
 ---
 
-# Exporting Logs to OpenTelemetry
+# Configuring OTEL Export
 
 Starting in `v0.7.0`, iron-proxy can export audit logs as OpenTelemetry structured log records. This lets you send every proxied request to any OTLP-compatible backend: Axiom, ClickHouse, Logfire, Grafana Cloud, or your own collector.
 
@@ -63,7 +63,7 @@ services:
 
 ## Example: Amazon ECS
 
-If you followed the [ECS guide](/guides/ecs), add the OTEL variables to the iron-proxy container definition:
+If you followed the [ECS guide](/deploy/ecs), add the OTEL variables to the iron-proxy container definition:
 
 ```json
 {

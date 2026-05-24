@@ -1,0 +1,71 @@
+---
+title: "Concept: Transforms"
+description: "The pipeline every outbound request runs through. Each policy you configure (host allowlist, credential injection, signing, LLM judge, header stripping) is a transform."
+---
+
+# Concept: Transforms
+
+A transform is a single processing step that runs on every outbound request. Every policy in iron-proxy is configured as a transform: the host allowlist, credential injection, signing, the LLM judge, header stripping. They all share the same shape (a `name` and a `config` block), live in the same ordered list, and run on every request.
+
+```yaml
+transforms:
+  - name: allowlist
+    config: ...
+  - name: secrets
+    config: ...
+  - name: header_allowlist
+    config: ...
+```
+
+For each request, iron-proxy runs the transforms top-to-bottom. Each one inspects the request, optionally modifies it, and either passes control to the next transform or rejects the request. The request is forwarded upstream only if every transform passes.
+
+## Rejection Short-Circuits
+
+If a transform rejects, the rest don't run. The workload gets a 4xx response (the status code depends on the transform; each policy page calls out its own). The audit log records the rejection with the name of the transform that decided and the reason.
+
+## Scoping With `rules`
+
+Most transforms accept a `rules` field that limits them to specific destinations:
+
+```yaml
+- name: secrets
+  config:
+    secrets:
+      - source: { type: env, var: GITHUB_TOKEN }
+        replace: ...
+        rules:
+          - host: "api.github.com"
+            methods: ["GET", "POST"]
+            paths: ["/repos/*"]
+```
+
+`rules` uses the same shape as the [host allowlist's rules](/policies/host-allowlist). Each rule matches a host glob or CIDR with optional method and path filters. A transform with `rules` only acts on requests that match; everything else passes through untouched.
+
+`allowlist` is the exception: its `rules` are the allowlist itself, not a scope modifier.
+
+## Ordering
+
+Order matters in a few specific cases. Each policy page calls out its preferred position; the general rules:
+
+- **`allowlist` first.** Cheap rejections should happen before any other transform does work on a request that will be denied.
+- **`judge` before `secrets`.** The LLM provider sees proxy tokens, not real credentials. See [pipeline ordering](/policies/llm-judge#pipeline-ordering) for the tradeoffs.
+- **`header_allowlist` after credential-injecting transforms.** Otherwise the injected headers (`Authorization`, signatures, etc.) get stripped before egress.
+
+When two transforms of the same type target the same destination, the first one in config order wins.
+
+## Audit Annotations
+
+Every transform writes an entry to the per-request audit trace. The entry records the transform's name, what it did (`continue`, `reject`, or annotations like `swapped` and `stripped_headers`), and any per-transform context. The audit log lets you answer questions like "did the OAuth refresh happen?" or "which header got stripped?" without instrumenting the workload.
+
+## Available Transforms
+
+- [Host Allowlist](/policies/host-allowlist): default-deny on destination hosts, methods, and paths.
+- [Credential Proxying](/credential-proxying/overview): substitute, mint, or sign credentials at the boundary. Includes static secrets, OAuth2, AWS SigV4, HMAC, and GCP service accounts.
+- [LLM Judge](/policies/llm-judge): semantic policy via an LLM call.
+- [Header Allowlist](/policies/header-allowlist): default-deny on request headers.
+- [Body Capture](/reference/configuration#body_capture) and [Header Capture](/reference/configuration#header_capture): copy request bodies or header values into the audit log without modifying the request.
+- [gRPC](/reference/configuration#grpc): delegate request and response processing to an external server.
+
+[MCP Interception](/policies/mcp-interception) is configured separately under the top-level `mcp` block, not as a transform, and runs after the transform pipeline.
+
+See the [configuration reference](/reference/configuration#transforms) for the full schema of each.

@@ -1,9 +1,9 @@
 ---
-title: "Amazon ECS Integration"
+title: "Deploy on Amazon ECS"
 description: "Lock down egress traffic on ECS clusters using iron-proxy as a daemon service."
 ---
 
-# Amazon ECS Integration
+# Deploy on Amazon ECS
 
 Run iron-proxy as a [daemon service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_services.html#service_scheduler_daemon) on Amazon ECS. The proxy intercepts all outbound HTTP/HTTPS traffic from workload containers and checks it against a domain allowlist.
 
@@ -399,7 +399,7 @@ Workload containers need to trust iron-proxy's CA certificate. Mount the CA volu
 
 Alternatively, you can bake the CA certificate directly into your workload Dockerfile. In that case, you'll need to pre-generate the CA rather than using the init container.
 
-For more details, see the [CA certificate reference](/reference/ca-certificates).
+For more details, see the [CA certificate reference](/guides/ca-certificates).
 
 ## Secrets
 

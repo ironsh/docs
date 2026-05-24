@@ -1,0 +1,53 @@
+---
+title: "Host Allowlist"
+description: "The default-deny policy at the network edge. Requests to hosts not in the allowlist return 403."
+---
+
+# Host Allowlist
+
+The `allowlist` transform decides which destinations the workload can reach. Requests to hosts not in the allowlist return 403. This is the default-deny boundary; everything else iron-proxy does runs on top of it.
+
+The allowlist is configured as a [transform](/reference/configuration#allowlist) in your iron-proxy YAML.
+
+## What You Can Match
+
+The allowlist accepts three kinds of entries: flat domain globs, flat CIDR ranges, and structured rules with method and path filters.
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "registry.npmjs.org"
+        - "*.anthropic.com"
+      cidrs:
+        - "10.0.0.0/8"
+      rules:
+        - host: "api.github.com"
+          methods: ["GET"]
+          paths: ["/repos/*"]
+```
+
+Flat `domains` and `cidrs` allow all methods and paths on the matched destination. `rules` exist when you need to restrict by method or path on a per-destination basis. Both can appear in the same allowlist.
+
+A bare `"*"` matches any host. Use it as a catch-all when you want to log traffic without restricting it.
+
+## Warn Mode
+
+`warn: true` logs allowlist violations without blocking the request. The audit log records the host that would have been blocked and the policy that matched.
+
+```yaml
+- name: allowlist
+  config:
+    warn: true
+    domains:
+      - "registry.npmjs.org"
+```
+
+Useful when you're rolling iron-proxy in front of an existing workload and don't yet know the full list of hosts it talks to. Run in `warn` for a few days, read the log, tighten the list, then flip `warn` off.
+
+## Pipeline Position
+
+Place `allowlist` first in your `transforms:` list. Other transforms (credential injection, signing, MCP interception) only need to run on requests the allowlist will permit; putting `allowlist` first avoids work on requests that will be rejected.
+
+See the [configuration reference](/reference/configuration#allowlist) for the full schema.

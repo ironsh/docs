@@ -105,7 +105,7 @@ The interceptor evaluates the request body after the transform pipeline finishes
 
 - **`allowlist`**: must permit the MCP server's host before MCP rules can apply. A request blocked by the allowlist never reaches the interceptor.
 - **`secrets`**: any proxy tokens are replaced before MCP evaluates `params.arguments`. Argument matchers see real values, so write `equals` or `in` matchers against real argument values rather than proxy tokens.
-- **`judge`**: place an LLM judge before `secrets` if you want it to evaluate proxy tokens, as documented in the [LLM Judge reference](/reference/llm-judge#pipeline-ordering). The MCP interceptor runs after both.
+- **`judge`**: place an LLM judge before `secrets` if you want it to evaluate proxy tokens, as documented in the [LLM Judge reference](/policies/llm-judge#pipeline-ordering). The MCP interceptor runs after both.
 
 ## Limitations
 

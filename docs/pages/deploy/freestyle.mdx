@@ -1,9 +1,9 @@
 ---
-title: "Freestyle Integration"
+title: "Deploy on Freestyle"
 description: "Run iron-proxy inside Freestyle VMs using pre-baked snapshots for fast, repeatable egress control."
 ---
 
-# Freestyle Integration
+# Deploy on Freestyle
 
 Run iron-proxy inside [Freestyle](https://freestyle.sh) VMs. You create a VM snapshot with iron-proxy pre-installed, then use that snapshot to launch ephemeral VMs with egress control already configured.
 
@@ -322,7 +322,7 @@ If you use Freestyle's [serverless runs](https://docs.freestyle.sh/v2/serverless
 
 ## Trusting the CA
 
-The snapshot script trusts the CA system-wide and sets common runtime environment variables. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+The snapshot script trusts the CA system-wide and sets common runtime environment variables. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/guides/ca-certificates) for per-runtime details.
 
 ## Troubleshooting
 
@@ -354,4 +354,4 @@ If it was overwritten (e.g., by DHCP), the snapshot's `systemd-resolved` disable
 
 ### TLS Certificate Errors
 
-If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during snapshot creation, and ensure the appropriate environment variable is set for your runtime. See [CA Certificates](/reference/ca-certificates) for details.
+If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during snapshot creation, and ensure the appropriate environment variable is set for your runtime. See [Managing CA Certificates](/guides/ca-certificates) for details.

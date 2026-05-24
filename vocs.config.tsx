@@ -14,17 +14,65 @@ if (window.location.hostname !== 'localhost') {
 }
 `;
 
+const conversionTrackingSnippet = `
+(function () {
+  if (typeof window === 'undefined') return;
+  function pageContext() {
+    return { path: window.location.pathname, page_title: document.title };
+  }
+  function findAnchor(target) {
+    while (target && target !== document.body) {
+      if (target.tagName === 'A') return target;
+      target = target.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener('click', function (event) {
+    var anchor = findAnchor(event.target);
+    if (!anchor) return;
+    var href = anchor.getAttribute('href') || '';
+    var source = anchor.getAttribute('data-cta-source') || pageContext().path;
+    if (href.indexOf('cal.com') !== -1) {
+      if (window.posthog) window.posthog.capture('cal_com_click', Object.assign({ source: source, href: href }, pageContext()));
+    } else if (href.indexOf('github.com') !== -1) {
+      if (window.posthog) window.posthog.capture('github_click', Object.assign({ source: source, href: href }, pageContext()));
+    }
+  }, true);
+  document.addEventListener('copy', function () {
+    var sel = window.getSelection ? String(window.getSelection()) : '';
+    if (!sel) return;
+    if (/docker\\s+(run|compose)/.test(sel) || /iron-proxy/.test(sel)) {
+      if (window.posthog) window.posthog.capture('quickstart_command_copied', Object.assign({ length: sel.length }, pageContext()));
+    }
+  }, true);
+})();
+`;
+
 export default defineConfig({
   title: "iron.sh",
   description: "iron-proxy documentation",
   rootDir: "docs",
   logoUrl: "/logo.svg",
   iconUrl: "/favicon.ico",
-  head: () => <script dangerouslySetInnerHTML={{ __html: posthogSnippet }} />,
+  head: ({ path }) => {
+    const SITE_URL = "https://docs.iron.sh";
+    const normalized = path === "/" ? "" : path.replace(/\/$/, "");
+    const canonical = `${SITE_URL}${normalized}`;
+    return (
+      <>
+        <link rel="canonical" href={canonical} />
+        <script dangerouslySetInnerHTML={{ __html: posthogSnippet }} />
+        <script dangerouslySetInnerHTML={{ __html: conversionTrackingSnippet }} />
+      </>
+    );
+  },
   font: {
     mono: { google: "JetBrains Mono" },
   },
-  topNav: [{ text: "Blog", link: "https://iron.sh/blog" }],
+  topNav: [
+    { text: "Blog", link: "https://iron.sh/blog" },
+    { text: "Talk to us", link: "https://cal.com/matt-slipper-ironsh/15min" },
+  ],
   socials: [
     { icon: "github", link: "https://github.com/ironsh/iron-proxy" },
   ],
@@ -99,41 +147,82 @@ export default defineConfig({
     { text: "Quickstart", link: "/quickstart" },
     { text: "Getting Help", link: "/help" },
     {
-      text: "Credential Proxying",
+      text: "Use Cases",
       collapsed: false,
       items: [
-        { text: "Overview", link: "/credential-proxying/overview" },
-        { text: "Static Secrets", link: "/credential-proxying/static-secrets" },
-        { text: "OAuth2 Token Injection", link: "/credential-proxying/oauth-token" },
-        { text: "HMAC Request Signing", link: "/credential-proxying/hmac-sign" },
-        { text: "AWS Request Signing", link: "/credential-proxying/aws-auth" },
-        { text: "GCP Service Accounts", link: "/credential-proxying/gcp-auth" },
+        { text: "CI/CD Egress Control", link: "/use-cases/ci-cd" },
+        { text: "AI Coding Agents", link: "/use-cases/ai-coding-agents" },
+        { text: "Sandboxed Code Execution", link: "/use-cases/sandboxed-code" },
+      ],
+    },
+    {
+      text: "Configure Policies",
+      collapsed: false,
+      items: [
+        { text: "Concept: Transforms", link: "/policies/transforms" },
+        { text: "Host Allowlist", link: "/policies/host-allowlist" },
+        {
+          text: "Credential Proxying",
+          collapsed: false,
+          items: [
+            { text: "Overview", link: "/credential-proxying/overview" },
+            { text: "Static Secrets", link: "/credential-proxying/static-secrets" },
+            { text: "OAuth2 Token Injection", link: "/credential-proxying/oauth-token" },
+            { text: "HMAC Request Signing", link: "/credential-proxying/hmac-sign" },
+            { text: "AWS Request Signing", link: "/credential-proxying/aws-auth" },
+            { text: "GCP Service Accounts", link: "/credential-proxying/gcp-auth" },
+          ],
+        },
+        { text: "LLM Judge", link: "/policies/llm-judge" },
+        { text: "Header Allowlist", link: "/policies/header-allowlist" },
+        { text: "MCP Interception", link: "/policies/mcp-interception" },
+      ],
+    },
+    {
+      text: "Deploy",
+      collapsed: false,
+      items: [
+        { text: "Overview", link: "/deploy/overview" },
+        { text: "Bare Metal", link: "/deploy/bare-metal" },
+        { text: "Kubernetes", link: "/deploy/kubernetes" },
+        { text: "Amazon ECS", link: "/deploy/ecs" },
+        { text: "GitHub Actions", link: "/deploy/github-actions" },
+        { text: "Daytona", link: "/deploy/daytona" },
+        { text: "Freestyle", link: "/deploy/freestyle" },
+      ],
+    },
+    {
+      text: "Operate",
+      collapsed: false,
+      items: [
+        {
+          text: "Control Plane",
+          collapsed: false,
+          items: [
+            { text: "Overview", link: "/control-plane/overview" },
+            { text: "Enrollment", link: "/control-plane/enrollment" },
+            { text: "Policies", link: "/control-plane/policies" },
+            { text: "Self-Hosted", link: "/control-plane/self-hosted" },
+          ],
+        },
       ],
     },
     {
       text: "Guides",
       collapsed: false,
       items: [
-        { text: "Bare Metal Integration", link: "/guides/bare-metal" },
-        { text: "Daytona Integration", link: "/guides/daytona" },
-        { text: "Amazon ECS Integration", link: "/guides/ecs" },
-        { text: "Freestyle Integration", link: "/guides/freestyle" },
-        { text: "GitHub Actions Integration", link: "/guides/github-actions" },
-        { text: "Kubernetes Integration", link: "/guides/kubernetes" },
-        { text: "Exporting Logs to OpenTelemetry", link: "/guides/otel-export" },
-        { text: "SOCKS5 and CONNECT Tunnels", link: "/guides/socks5-connect" },
+        { text: "Configuring OTEL Export", link: "/guides/otel-export" },
+        { text: "Managing CA Certificates", link: "/guides/ca-certificates" },
+        { text: "Tunneling with SOCKS5 and CONNECT", link: "/guides/socks5-connect" },
       ],
     },
     {
-      text: "Control Plane",
+      text: "Reference",
       collapsed: false,
       items: [
-        { text: "Overview", link: "/control-plane/overview" },
-        { text: "Enrollment", link: "/control-plane/enrollment" },
-        { text: "Policies", link: "/control-plane/policies" },
-        { text: "Self-Hosted", link: "/control-plane/self-hosted" },
+        { text: "Configuration", link: "/reference/configuration" },
         {
-          text: "API Reference",
+          text: "Control Plane API",
           collapsed: true,
           items: [
             { text: "Overview", link: "/control-plane/api/overview" },
@@ -142,17 +231,6 @@ export default defineConfig({
             { text: "MCP Policies", link: "/control-plane/api/mcp-policies" },
           ],
         },
-      ],
-    },
-    {
-      text: "Reference",
-      collapsed: false,
-      items: [
-        { text: "Deployment Methods", link: "/reference/deployment-methods" },
-        { text: "Configuration", link: "/reference/configuration" },
-        { text: "LLM Judge", link: "/reference/llm-judge" },
-        { text: "MCP Interception", link: "/reference/mcp-interception" },
-        { text: "CA Certificates", link: "/reference/ca-certificates" },
       ],
     },
   ],
