@@ -1,50 +1,44 @@
 ---
 title: "Overview"
-description: "What iron-proxy is, who it's for, and how it fits into your stack."
+description: "iron-proxy is a single-binary egress firewall for code you don't fully trust. Default-deny network access, credentials held at the boundary, every request logged."
 ---
 
 # Overview
 
-iron-proxy is a single-binary egress firewall for untrusted workloads. It intercepts outbound traffic, checks every request against policy, and injects secrets at the network edge so the workload never sees a real credential.
+iron-proxy is a single-binary egress firewall for workloads you don't fully trust. It enforces an allowlist on outbound HTTP and HTTPS, holds credentials so the workload never sees the real value, and records every request as structured JSON.
 
-CI jobs, AI coding agents, and sandboxed containers already have network access and real credentials. A compromised dependency, a prompt injection, or a malicious build step can exfiltrate secrets, phone home, or open a reverse shell. Most setups give you no visibility into whether that is happening. iron-proxy is the boundary that stops it, and every request is logged with full detail on what was allowed, blocked, and transformed.
+The allowlist is keyed on host. Domain globs (`*.anthropic.com`) and CIDRs both work. A `warn` mode logs without blocking, so you can size the list against real traffic before enforcement. Anything not on the list returns 403.
 
-## How It Works
+Credentials stay in the proxy process. Static API keys swap in for placeholders the workload sends. OAuth bearer tokens, AWS SigV4 and HMAC signatures, and GCP service-account tokens are minted per request from longer-lived material the workload never sees. See [credential proxying](/credential-proxying/overview) for the full set.
 
-iron-proxy sits between your containers and the internet. All outbound traffic is intercepted, checked against your policy, and either transformed and forwarded or blocked. Nothing leaves unless explicitly allowed.
+Every request, allowed or blocked, becomes a JSON log line: host, method, path, status, duration, the policy that decided, the secrets injected. Pipe it to your SIEM, your warehouse, or `jq`.
 
-```
-Container → iron-proxy → policy check → transform pipeline → upstream (or reject)
-```
+One YAML file configures all of it. The same binary runs as a sidecar, a systemd unit, a daemon, or a CI step.
 
-## Key Capabilities
+## Try It
 
-**Default-deny egress.** Nothing leaves unless you allow it. Allowlists support domain globs (`*.anthropic.com`) and CIDRs (`10.0.0.0/8`), with an optional `warn` mode for auditing before enforcement.
+If you want a demo, run the [quickstart](/quickstart). It's a local Docker Compose loop that shows allow, block, and secret-swap behavior in one terminal.
 
-**Secret injection at the boundary.** Workloads never see real credentials. They only hold proxy tokens. iron-proxy swaps in real values at the network edge before forwarding. If a workload is compromised, there are no real secrets to exfiltrate.
+If you want to deploy in production, see [deployment methods](/deploy/overview) for the runtimes iron-proxy supports and the tradeoffs between them.
 
-**Full audit trail.** Every request is logged as structured JSON with host, method, path, status, and duration. Logs include per-transform annotations: which secrets were injected, where, and which policy allowed or rejected the request.
+If you want to see what a real config looks like before you commit, browse the [common setups](#common-setups) below.
 
-**Streaming-aware.** WebSocket upgrades and Server-Sent Events are proxied natively.
+## Common Setups
 
-## Who It's For
+- [CI/CD egress control](/use-cases/ci-cd): allowlist the registries and APIs a build needs, hold the registry tokens, log every request.
+- [AI coding agents](/use-cases/ai-coding-agents): allowlist model APIs and source hosts, hold provider keys, log blocked calls.
+- [Sandboxed code execution](/use-cases/sandboxed-code): per-sandbox allowlist, scoped credentials, per-request audit log.
 
-If you run untrusted code that has network access and credentials, you need iron-proxy. That includes CI pipelines with third-party build steps, AI coding agents calling APIs, container platforms executing user-submitted code, or any workload where a compromise could mean silent data exfiltration.
-
-## Open Source and Managed Offering
-
-iron-proxy is [open source](https://github.com/ironsh/iron-proxy) and fully functional standalone. Run it anywhere: Docker, Kubernetes, bare metal, CI runners.
-
-When you're operating more than a handful of proxy instances, managing policies, secrets, and audit logs per-instance stops scaling. We're building a managed control plane that centralizes policy enforcement, secrets management, and audit aggregation across your fleet. [Get in touch](https://cal.com/matt-slipper-ironsh/15min) if you're interested.
-
-## Comparison With Alternatives
-
-iron-proxy is purpose-built for controlling and observing untrusted workloads. General-purpose proxies can be configured toward similar goals, but they weren't designed for this problem and lack built-in primitives for it.
+## How It Compares
 
 | | iron-proxy | Squid | mitmproxy | Envoy |
 |---|---|---|---|---|
 | **Primary use case** | Egress control for untrusted workloads | Web caching / access control | Traffic inspection / debugging | Service mesh / L7 routing |
 | **Default-deny egress** | Built-in | Requires complex ACL config | Requires custom scripting | Requires RBAC/filter config |
-| **Secret injection** | Built-in | — | — | — |
+| **Secret injection** | Built-in | | | |
 | **Audit logging** | Structured JSON with per-transform traces | Basic access logs | Plugin-based | Configurable access logs |
 | **Setup** | Single binary + YAML | Extensive config language | Python scripting | Complex YAML or control plane |
+
+## Open Source, With A Managed Option
+
+iron-proxy is [open source](https://github.com/ironsh/iron-proxy) and runs anywhere you can run a Linux process. A managed [control plane](/control-plane/overview) for policy, secrets, and audit aggregation across a fleet is in active development.

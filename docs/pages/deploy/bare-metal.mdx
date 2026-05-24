@@ -1,11 +1,11 @@
 ---
-title: "Bare Metal Integration"
+title: "Deploy on Bare Metal"
 description: "Install iron-proxy on a Linux host, run the init command, tune the generated config, then use iptables to transparently redirect all HTTP and HTTPS traffic through the proxy."
 ---
 
-# Bare Metal Integration
+# Deploy on Bare Metal
 
-Run iron-proxy directly on a Linux host: a physical server, a cloud VM, or any other machine where you control the network stack. This is the [embedded in a VM or sandbox](/reference/deployment-methods#embedded-in-a-vm-or-sandbox) deployment pattern.
+Run iron-proxy directly on a Linux host: a physical server, a cloud VM, or any other machine where you control the network stack. This is the [embedded in a VM or sandbox](/deploy/overview#embedded-in-a-vm-or-sandbox) deployment pattern.
 
 ## How It Works
 
@@ -89,7 +89,7 @@ curl --cacert /etc/iron-proxy/ca.crt \
 An allowed host returns normally. Anything not in the allowlist returns `403`.
 
 :::warning
-`ca.key` signs every leaf certificate workloads on this host will trust. Keep it off backups that leave the machine and rotate if it is ever exposed. See the [CA certificate reference](/reference/ca-certificates) for rotation guidance.
+`ca.key` signs every leaf certificate workloads on this host will trust. Keep it off backups that leave the machine and rotate if it is ever exposed. See the [CA certificate reference](/guides/ca-certificates) for rotation guidance.
 :::
 
 ### Edit The Config
@@ -195,7 +195,7 @@ sudo cp /etc/iron-proxy/ca.crt /etc/pki/ca-trust/source/anchors/iron-proxy.crt
 sudo update-ca-trust
 ```
 
-Some runtimes use their own trust bundle. Node.js uses `NODE_EXTRA_CA_CERTS`, Python `requests` uses `REQUESTS_CA_BUNDLE`. See the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+Some runtimes use their own trust bundle. Node.js uses `NODE_EXTRA_CA_CERTS`, Python `requests` uses `REQUESTS_CA_BUNDLE`. See the [CA certificate reference](/guides/ca-certificates) for per-runtime details.
 
 ::::
 

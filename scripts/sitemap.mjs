@@ -21,7 +21,7 @@ function walk(dir) {
 
 const pages = walk(DIST).map(({ path, mtime }) => {
   const rel = relative(DIST, path).split(sep).slice(0, -1).join("/");
-  const url = rel === "" ? `${SITE_URL}/` : `${SITE_URL}/${rel}`;
+  const url = rel === "" ? SITE_URL : `${SITE_URL}/${rel}`;
   return { url, lastmod: mtime.toISOString() };
 });
 

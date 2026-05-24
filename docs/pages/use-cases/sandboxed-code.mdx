@@ -1,0 +1,54 @@
+---
+title: "Sandboxed Code Execution"
+description: "Per-sandbox allowlist, scoped credentials, per-request audit log. iron-proxy is the network boundary alongside container isolation."
+---
+
+# Sandboxed Code Execution
+
+An iron-proxy in front of a sandbox allowlists the hosts the sandboxed code can reach, holds any credentials the platform exposes to that code, and logs every outbound request with the policy that decided.
+
+## A Starting Config
+
+```yaml
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "api.anthropic.com"
+        - "api.openai.com"
+        - "pypi.org"
+        - "*.pypi.org"
+        - "files.pythonhosted.org"
+
+  - name: secrets
+    config:
+      secrets:
+        - source: { type: env, var: OPENAI_API_KEY }
+          replace:
+            proxy_value: "proxy-openai-key"
+            match_headers: ["Authorization"]
+          rules:
+            - host: "api.openai.com"
+
+log:
+  level: "info"
+```
+
+The sandbox process gets `proxy-openai-key` in its environment.
+
+## Deploy It
+
+- [Kubernetes](/deploy/kubernetes): one proxy per pod for per-sandbox isolation, or one shared proxy with tenant-scoped policies.
+- [Amazon ECS](/deploy/ecs): sidecar in the sandbox task definition.
+- [Daytona](/deploy/daytona): pre-baked into the sandbox image.
+- [Freestyle](/deploy/freestyle): bootstrap during sandbox provisioning.
+
+## Multi-Tenant Patterns
+
+When many sandboxes need different policies, the [Control Plane](/control-plane/overview) lets you author centrally and roll to fleets of proxies. [Self-hosted](/control-plane/self-hosted) is available when the policy authority has to stay in your VPC.
+
+## Related
+
+- [MCP Interception](/policies/mcp-interception): per-tool policy for sandboxes that expose MCP servers.
+- [Audit log export](/guides/otel-export): pipe per-sandbox logs to your SIEM or warehouse.
+- [Quickstart](/quickstart): see the loop end-to-end in a local Compose setup.

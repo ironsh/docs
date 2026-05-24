@@ -1,9 +1,9 @@
 ---
-title: "Daytona Integration"
+title: "Deploy on Daytona"
 description: "Run iron-proxy inside Daytona sandboxes using a custom Docker image for egress control."
 ---
 
-# Daytona Integration
+# Deploy on Daytona
 
 Run iron-proxy inside [Daytona](https://www.daytona.io/) sandboxes. You build a custom Docker image with iron-proxy pre-installed, then use Daytona's [declarative builder](https://www.daytona.io/docs/en/declarative-builder/) to launch sandboxes with egress control already configured.
 
@@ -221,7 +221,7 @@ Set `warn` to `false` to block non-allowlisted requests. Rebuild the image and c
 
 ## Trusting the CA
 
-The entrypoint script trusts the CA system-wide via `update-ca-certificates`. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+The entrypoint script trusts the CA system-wide via `update-ca-certificates`. Most tools will work without additional configuration. If you run into TLS errors, see the [CA certificate reference](/guides/ca-certificates) for per-runtime details.
 
 ## Troubleshooting
 
@@ -251,4 +251,4 @@ If it was overwritten, the entrypoint may not have run correctly. Check that the
 
 ### TLS Certificate Errors
 
-If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during container startup, and ensure the appropriate environment variable is set for your runtime. See [CA Certificates](/reference/ca-certificates) for details.
+If you see `certificate signed by unknown authority`, the CA is not trusted by the runtime making the request. Check that `update-ca-certificates` ran successfully during container startup, and ensure the appropriate environment variable is set for your runtime. See [Managing CA Certificates](/guides/ca-certificates) for details.

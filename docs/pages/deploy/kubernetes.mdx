@@ -1,9 +1,9 @@
 ---
-title: "Kubernetes Integration"
+title: "Deploy on Kubernetes"
 description: "Run iron-proxy as an in-cluster Deployment with a fixed ClusterIP so workload pods can route DNS and egress through it."
 ---
 
-# Kubernetes Integration
+# Deploy on Kubernetes
 
 Run iron-proxy inside a Kubernetes cluster as a Deployment behind a Service with a fixed ClusterIP. Workload pods point their DNS at that ClusterIP, which routes lookups and TLS traffic through the proxy.
 
@@ -81,7 +81,7 @@ kubectl -n iron-proxy create secret generic iron-proxy-ca \
 ```
 
 :::warning
-Keep `ca.key` out of source control. Any holder of this key can mint certificates that workloads will trust. See the [CA certificate reference](/reference/ca-certificates) for rotation guidance.
+Keep `ca.key` out of source control. Any holder of this key can mint certificates that workloads will trust. See the [CA certificate reference](/guides/ca-certificates) for rotation guidance.
 :::
 
 ### Reserve A Service IP And Create The Service
@@ -473,7 +473,7 @@ Workload pods need to trust iron-proxy's CA. The simplest approach is to mount t
 | Node.js | `NODE_EXTRA_CA_CERTS=/etc/iron-proxy/ca.crt` |
 | Python (requests) | `REQUESTS_CA_BUNDLE=/etc/iron-proxy/ca.crt` |
 
-If you control the workload image, you can also bake the CA into the system trust store at image build time. See the [CA certificate reference](/reference/ca-certificates) for per-runtime details.
+If you control the workload image, you can also bake the CA into the system trust store at image build time. See the [CA certificate reference](/guides/ca-certificates) for per-runtime details.
 
 ## Troubleshooting
 

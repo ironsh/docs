@@ -1,0 +1,44 @@
+---
+title: "Header Allowlist"
+description: "Default-deny on request headers. Anything not on the allowlist is stripped before the request leaves the proxy."
+---
+
+# Header Allowlist
+
+The `header_allowlist` transform strips any request header not in a configured allowlist before forwarding upstream. Workloads send a lot of headers you may not want upstream to see: cookies, internal trace IDs, debug headers, telemetry. `header_allowlist` enforces a minimum surface area at egress regardless of what the workload's HTTP client is doing.
+
+The default is deny: every header must match a literal name or a regex pattern to pass through. Stripped header names appear in the audit log under `stripped_headers`.
+
+The header allowlist is configured as a [transform](/reference/configuration#header_allowlist) in your iron-proxy YAML.
+
+## What You Can Match
+
+Entries are either literal header names (case-insensitive) or `/regex/` patterns. Regex patterns are compiled at config load time and matched against canonical header names case-insensitively.
+
+```yaml
+- name: header_allowlist
+  config:
+    headers:
+      - "Authorization"
+      - "Content-Type"
+      - "User-Agent"
+      - "Accept"
+      - "/^X-Trace-.*$/"
+    rules:
+      - host: "api.openai.com"
+```
+
+The `rules` field scopes the allowlist to specific destinations using the same shape as the [host allowlist's rules](/policies/host-allowlist). Omit `rules` to apply the allowlist to every request.
+
+## Pipeline Position
+
+Place `header_allowlist` after any transform that injects headers: `secrets`, the OAuth/AWS/HMAC/GCP signing transforms, and any other transform that writes a header. Otherwise the injected headers are stripped before egress.
+
+```yaml
+transforms:
+  - name: allowlist        # decide which hosts can be reached
+  - name: secrets          # inject real credentials
+  - name: header_allowlist # strip anything else
+```
+
+See the [configuration reference](/reference/configuration#header_allowlist) for the full schema.
